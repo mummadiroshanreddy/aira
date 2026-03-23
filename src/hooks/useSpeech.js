@@ -38,7 +38,10 @@ export const useSpeech = (options = {}) => {
           }
 
           if (finalTrans) {
-            setTranscript(prev => (prev + ' ' + finalTrans).trim());
+            setTranscript(prev => {
+              const combined = (prev + ' ' + finalTrans).trim();
+              return combined.replace(/\b(\w+)( \1\b)+/gi, '$1');
+            });
           }
           setInterimTranscript(interimTrans);
         };
@@ -58,7 +61,7 @@ export const useSpeech = (options = {}) => {
         recognitionRef.current.onend = () => {
           // Auto-reconnect explicitly unless manually stopped
           if (shouldListenRef.current) {
-            try { reconocimientoRef.current.start(); } catch(e) {}
+            try { recognitionRef.current.start(); } catch(e) {}
           } else {
             setIsListening(false);
           }
