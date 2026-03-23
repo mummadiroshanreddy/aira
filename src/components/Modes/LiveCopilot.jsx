@@ -277,26 +277,43 @@ You are not an assistant. You are a real-time interview weapon.`;
 
   const clearSession = () => { if(window.confirm('Clear memory?')) setHistory([]); };
 
+  const stealthTheme = {
+    bg: '#ffffff',
+    text: '#111827',
+    dim: '#6B7280',
+    border: '#E5E7EB',
+    accent: '#3B82F6',
+    font: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+  };
+
   const getSectionColor = (emoji) => {
     switch (emoji) {
-      case '⚡': return stealthMode ? 'var(--cyan-dim)' : 'var(--cyan)';
-      case '🎯': return stealthMode ? 'var(--green-dim)' : 'var(--green)';
-      case '📍': return stealthMode ? 'var(--yellow-dim)' : 'var(--yellow)';
-      case '🔥': return stealthMode ? 'var(--orange-dim)' : 'var(--orange)';
-      case '⚠️': return stealthMode ? 'var(--red-dim)' : 'var(--red)';
-      default: return 'var(--border-dim)';
+      case '⚡': return stealthMode ? stealthTheme.accent : 'var(--cyan)';
+      case '🎯': return stealthMode ? stealthTheme.text : 'var(--green)';
+      case '📍': return stealthMode ? stealthTheme.text : 'var(--yellow)';
+      case '🔥': return stealthMode ? stealthTheme.text : 'var(--orange)';
+      case '⚠️': return stealthMode ? stealthTheme.accent : 'var(--red)';
+      default: return stealthMode ? stealthTheme.border : 'var(--border-dim)';
     }
   };
 
   return (
     <div style={{ 
-        maxWidth: stealthMode ? 480 : 900, 
-        margin: '0 auto', 
+        maxWidth: stealthMode ? 550 : 900, 
+        margin: stealthMode ? '0 0 0 auto' : '0 auto', 
         display: 'flex', 
         flexDirection: 'column', 
         gap: stealthMode ? 16 : 24, 
         position: 'relative',
-        transition: 'all 0.3s ease'
+        transition: 'all 0.3s ease',
+        background: stealthMode ? stealthTheme.bg : 'transparent',
+        padding: stealthMode ? '24px 32px' : '0',
+        borderRadius: stealthMode ? '16px' : '0',
+        fontFamily: stealthMode ? stealthTheme.font : 'inherit',
+        color: stealthMode ? stealthTheme.text : 'inherit',
+        boxShadow: stealthMode ? '0 10px 40px rgba(0,0,0,0.2)' : 'none',
+        height: stealthMode ? 'calc(100vh - 40px)' : 'auto',
+        overflowY: stealthMode ? 'auto' : 'visible'
     }}>
 
       {/* DEBUG HUD PANEL (Part 15) */}
@@ -311,11 +328,11 @@ You are not an assistant. You are a real-time interview weapon.`;
       </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: stealthMode ? '1px solid var(--border-dim)' : 'none', paddingBottom: stealthMode ? 12 : 0 }}>
-        <h2 style={{ fontSize: stealthMode ? 16 : 24, display: 'flex', gap: 12, alignItems: 'center', opacity: stealthMode ? 0.7 : 1 }}>
-          {stealthMode ? 'Meeting Mode' : 'Live Interview Assist'}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: stealthMode ? `1px solid ${stealthTheme.border}` : 'none', paddingBottom: stealthMode ? 16 : 0, position: 'sticky', top: 0, background: stealthMode ? stealthTheme.bg : 'transparent', zIndex: 10 }}>
+        <h2 style={{ fontSize: stealthMode ? 18 : 24, fontWeight: stealthMode ? 600 : 'normal', display: 'flex', gap: 12, alignItems: 'center', color: stealthMode ? stealthTheme.text : 'inherit' }}>
+          {stealthMode ? 'Meeting Notes' : 'Live Interview Assist'}
           {/* Active Status Indicator */}
-          {isListening && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulseRed 1.5s infinite' }} title="Full Duplex Mic Active" />}
+          {isListening && !stealthMode && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulseRed 1.5s infinite' }} title="Full Duplex Mic Active" />}
         </h2>
         
         <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
@@ -358,17 +375,16 @@ You are not an assistant. You are a real-time interview weapon.`;
             <div key={msg.id} style={{ animation: 'fadeSlideUp 0.3s ease' }}>
               {msg.role === 'user' ? (
                 <div style={{ 
-                  background: stealthMode ? 'transparent' : 'var(--bg-raised)', 
-                  padding: stealthMode ? '8px 12px' : '16px 24px', 
+                  background: stealthMode ? stealthTheme.bg : 'var(--bg-raised)', 
+                  padding: stealthMode ? '4px 0 12px 0' : '16px 24px', 
                   borderRadius: stealthMode ? 0 : '16px 16px 16px 4px', 
                   border: stealthMode ? 'none' : '1px solid var(--border-dim)', 
-                  borderLeft: stealthMode ? '2px solid rgba(255,255,255,0.1)' : '1px solid var(--border-dim)',
-                  marginBottom: stealthMode ? 8 : 24, 
+                  marginBottom: stealthMode ? 2 : 24, 
                   display: 'inline-block', 
                   maxWidth: stealthMode ? '100%' : '85%' 
                 }}>
-                   <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>THEY ASKED:</div>
-                   <div style={{ fontSize: stealthMode ? 14 : 18, color: '#fff', lineHeight: 1.4 }}>"{msg.content}"</div>
+                   {!stealthMode && <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, letterSpacing: 1 }}>THEY ASKED:</div>}
+                   <div style={{ fontSize: stealthMode ? 14 : 18, color: stealthMode ? stealthTheme.dim : '#fff', lineHeight: 1.4, fontStyle: stealthMode ? 'italic' : 'normal' }}>"{msg.content}"</div>
                 </div>
               ) : (
                 <div style={{ 
@@ -392,29 +408,27 @@ You are not an assistant. You are a real-time interview weapon.`;
                   )}
 
                   {msg.sections && msg.sections.length > 0 && (
-                    <div style={{ display: 'grid', gap: stealthMode ? 8 : 16 }}>
+                    <div style={{ display: 'grid', gap: stealthMode ? 6 : 16 }}>
                       {msg.sections.map((sec, sIdx) => {
                         const color = getSectionColor(sec.emoji);
                         return (
                           <div key={sIdx} className={stealthMode ? "" : "aria-card"} style={{ 
-                            padding: stealthMode ? "12px 0" : 20, 
+                            padding: stealthMode ? "4px 0" : 20, 
                             borderTop: stealthMode ? 'none' : `2px solid ${color}`, 
-                            borderLeft: stealthMode ? `2px solid ${color}` : 'none',
-                            paddingLeft: stealthMode ? 12 : 20,
                             background: stealthMode ? 'transparent' : 'var(--bg-raised)',
                             animation: `fadeSlideIn 0.3s ease forwards` 
                           }}>
-                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: stealthMode ? 4 : 12 }}>
-                               <div style={{ fontSize: stealthMode ? 11 : 13, color, fontWeight: 'bold', letterSpacing: 1 }}>{stealthMode ? sec.emoji + ' ' + sec.header.replace(/[^\w\s]/gi, '') : sec.header}</div>
+                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: stealthMode ? 2 : 12 }}>
+                               <div style={{ fontSize: stealthMode ? 14 : 13, color, fontWeight: stealthMode ? 600 : 'bold', letterSpacing: stealthMode ? 0 : 1 }}>{stealthMode ? sec.header.replace(/[^\w\s]/gi, '').trim() : sec.header}</div>
                              </div>
-                             <div style={{ fontSize: stealthMode ? 14 : 15, color: stealthMode ? '#e0e0e0' : 'var(--text-primary)', lineHeight: stealthMode ? 1.4 : 1.6 }}>{sec.content}</div>
+                             <div style={{ fontSize: stealthMode ? 15 : 15, color: stealthMode ? stealthTheme.text : 'var(--text-primary)', lineHeight: stealthMode ? 1.5 : 1.6 }}>{sec.content}</div>
                           </div>
                         );
                       })}
                     </div>
                   )}
 
-                  {msg.content && !isGenerating && index === history.length - 1 && (
+                  {msg.content && !isGenerating && !stealthMode && index === history.length - 1 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)', opacity: 0.6, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span>{PROVIDER_META[msg.provider]?.badge}</span>
