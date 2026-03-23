@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
-import { streamClaude, cancelActiveStream } from '../../api/claude';
+import { streamClaude, cancelActiveStream, callClaude } from '../../api/claude';
 import { useSpeech } from '../../hooks/useSpeech';
 import { useTTS } from '../../hooks/useTTS';
 import FollowUpRadar from '../UI/FollowUpRadar';
@@ -22,6 +22,10 @@ const LiveCopilot = () => {
   // Stealth Mode Toggle
   const [stealthMode, setStealthMode] = useState(false);
   const [lastStreamId, setLastStreamId] = useState(null);
+
+  // Pre-Answer Engine Cache
+  const [predictions, setPredictions] = useState([]);
+  const [isPredicting, setIsPredicting] = useState(false);
 
   const messagesEndRef = useRef(null);
   const requestStartTimeRef = useRef(0);
@@ -46,10 +50,10 @@ const LiveCopilot = () => {
 
   // Predictive Barge-in: Interrupt AI instantly if user speaks
   useEffect(() => {
-    if (interimTranscript.trim().length > 2) {
+    if (interimTranscript.trim().length > 1) {
       if (isGenerating || isSpeaking) {
-        cancelActiveStream();
         cancelTTS();
+        cancelActiveStream();
         setIsGenerating(false);
         toast.show('AI Interrupted', 'info');
       }
@@ -73,6 +77,28 @@ const LiveCopilot = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [history]);
 
+  const calculateSimilarity = (str1, str2) => {
+    const words1 = str1.toLowerCase().replace(/[^\w\s]/g, '').split(' ');
+    const words2 = str2.toLowerCase().replace(/[^\w\s]/g, '').split(' ');
+    const intersection = words1.filter(w => words2.includes(w));
+    return (intersection.length * 2) / (words1.length + words2.length);
+  };
+
+  const preGenerateNextQuestions = async (currentHistory) => {
+    if (isPredicting || currentHistory.length < 2) return;
+    setIsPredicting(true);
+    try {
+      const predPrompt = `You are a prediction engine. Based on the interview so far, predict the 2 most likely follow-up questions the interviewer will ask next.
+Generate a stellar, highly strategic answer for each predicted question using the Verve UI structure.
+Return ONLY a valid JSON array of objects in this format:
+[ { "question": "predicted question here", "answer": "⚡ HOOK\\n...\\n🎯 CORE MESSAGE\\n...\\n📍 PROOF POINT\\n...\\n🔥 POWER CLOSE\\n..." } ]`;
+      
+      const rawText = await callClaude(predPrompt, "Generate JSON predictions.", currentHistory.filter(m => m.content).map(m => ({ role: m.role, content: m.content })), activeProvider || 'groq');
+      const jsonMatch = rawText.match(/\[[\s\S]*\]/);
+      if (jsonMatch) setPredictions(JSON.parse(jsonMatch[0]));
+    } catch(e) { } finally { setIsPredicting(false); }
+  };
+
   const submitQuestion = async (text) => {
     if (!text || typeof text !== 'string' || !text.trim()) return;
     
@@ -86,10 +112,40 @@ const LiveCopilot = () => {
     resetTranscript();
 
     const newMessage = { id: Date.now(), role: 'user', content: text };
-    const copilotMessage = { id: Date.now() + 1, role: 'assistant', content: '', sections: [], followUps: [], provider: activeProvider };
+    let copilotMessage = { id: Date.now() + 1, role: 'assistant', content: '', sections: [], followUps: [], provider: activeProvider };
+
+    // ── PRE-ANSWER ENGINE CACHE CHECK ──
+    let instantHit = null;
+    if (predictions.length > 0) {
+      const match = predictions.find(p => calculateSimilarity(text, p.question) > 0.6);
+      if (match) {
+        instantHit = match.answer;
+        toast.show('⚡ Pre-Answer Engine: 0ms Latency', 'success');
+        copilotMessage.content = instantHit;
+        
+        const parts = instantHit.split(/(?=⚡|🎯|📍|🔥|⚠️|💡)/g).map(s => s.trim()).filter(Boolean);
+        const parsedSections = [];
+        parts.forEach(part => {
+          const headerEnd = part.indexOf('\n');
+          const headerRaw = headerEnd > -1 ? part.substring(0, headerEnd).trim() : part.trim();
+          const textRaw = headerEnd > -1 ? part.substring(headerEnd).trim() : '';
+          parsedSections.push({ header: headerRaw, content: textRaw, emoji: headerRaw[0] || '🔹' });
+        });
+        copilotMessage.sections = parsedSections;
+      }
+    }
 
     const newHistory = [...history, newMessage];
     setHistory([...newHistory, copilotMessage]);
+
+    if (instantHit) {
+      speakChunk(instantHit);
+      flush();
+      setIsGenerating(false);
+      setPredictions([]);
+      setTimeout(() => preGenerateNextQuestions([...newHistory, copilotMessage]), 100);
+      return;
+    }
 
     const systemPrompt = `You are ARIA — an elite real-time AI interview copilot.
 You operate at the level of top-tier candidates coached by ex-FAANG hiring managers.
@@ -114,6 +170,7 @@ You must think in terms of: persuasion, signal strength, hiring psychology, stru
 You are operating in LIVE INTERVIEW MODE. Responses must be immediately speakable.
 No long paragraphs. No fluff. No filler words. No meta commentary.
 If unclear: Make a smart assumption and proceed confidently.
+Before answering, quickly infer: What is the interviewer REALLY testing? Tailor the answer to that signal.
 Behavioral: Use storytelling + impact. Technical: Give structured step-by-step clarity.
 
 ----------------------------------------
@@ -193,10 +250,15 @@ You are not an assistant. You are a real-time interview weapon.`;
             return updated;
           });
         },
-        () => {
+        (fullText) => {
           setIsGenerating(false);
           flush(); // flush any remaining TTS tokens
           setLastUsedProvider(activeProvider || 'groq');
+          
+          setTimeout(() => {
+             const updatedHist = [...newHistory, { role: 'assistant', content: fullText }];
+             preGenerateNextQuestions(updatedHist);
+          }, 100);
         },
         (err) => { 
           setError(`Stream aborted: ${err.message}`); 
@@ -251,7 +313,7 @@ You are not an assistant. You are a real-time interview weapon.`;
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: stealthMode ? '1px solid var(--border-dim)' : 'none', paddingBottom: stealthMode ? 12 : 0 }}>
         <h2 style={{ fontSize: stealthMode ? 16 : 24, display: 'flex', gap: 12, alignItems: 'center', opacity: stealthMode ? 0.7 : 1 }}>
-          {stealthMode ? 'ARIA Stealth UI' : 'Live Tactical Feed'}
+          {stealthMode ? 'Meeting Mode' : 'Live Interview Assist'}
           {/* Active Status Indicator */}
           {isListening && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulseRed 1.5s infinite' }} title="Full Duplex Mic Active" />}
         </h2>
