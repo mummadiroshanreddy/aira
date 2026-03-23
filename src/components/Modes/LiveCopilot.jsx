@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { streamClaude, cancelActiveStream, callClaude } from '../../api/claude';
+import { socket } from '../../api/socket';
 import { useSpeech } from '../../hooks/useSpeech';
 import { useTTS } from '../../hooks/useTTS';
 import FollowUpRadar from '../UI/FollowUpRadar';
@@ -26,6 +27,11 @@ const LiveCopilot = () => {
   // Pre-Answer Engine Cache
   const [predictions, setPredictions] = useState([]);
   const [isPredicting, setIsPredicting] = useState(false);
+  
+  // Socket Awareness
+  const [isConnected, setIsConnected] = useState(socket.connected);
+  const [transport, setTransport] = useState(socket.io?.engine?.transport?.name || 'unknown');
+
 
   const messagesEndRef = useRef(null);
   const requestStartTimeRef = useRef(0);
@@ -50,15 +56,15 @@ const LiveCopilot = () => {
 
   // Predictive Barge-in: Interrupt AI instantly if user speaks
   useEffect(() => {
-    if (interimTranscript.trim().length > 1) {
+    if (interimTranscript.trim().length > 0) {
+      cancelActiveStream();
+      cancelTTS();
       if (isGenerating || isSpeaking) {
-        cancelTTS();
-        cancelActiveStream();
         setIsGenerating(false);
         toast.show('AI Interrupted', 'info');
       }
     }
-  }, [interimTranscript, isGenerating, isSpeaking, cancelTTS]);
+  }, [interimTranscript, isGenerating, isSpeaking, cancelTTS, cancelActiveStream]);
 
   // Initial Auto-listen
   useEffect(() => {
@@ -76,6 +82,29 @@ const LiveCopilot = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [history]);
+
+  // Sync Socket Status
+  useEffect(() => {
+    const onConnect = () => {
+      setIsConnected(true);
+      setTransport(socket.io?.engine?.transport?.name || 'websocket');
+    };
+    const onDisconnect = () => {
+      setIsConnected(false);
+      setIsGenerating(false); // Fail-safe
+      stopListening(); // Fail-safe
+      toast.show('Socket Disconnected. Attempting recovery...', 'error');
+    };
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+    };
+  }, [stopListening]);
+
 
   const calculateSimilarity = (str1, str2) => {
     const words1 = str1.toLowerCase().replace(/[^\w\s]/g, '').split(' ');
@@ -101,10 +130,19 @@ Return ONLY a valid JSON array of objects in this format:
 
   const submitQuestion = async (text, silent = false) => {
     if (!text || typeof text !== 'string' || !text.trim()) return;
+    if (isGenerating && !silent) return; // Prevent double trigger
+    
+    // Safety: Prevent infinite re-generation loops
+    if (silent && text.length > 1000) {
+      console.warn('[ARIA] Re-generation depth reached. Stopping.');
+      setIsGenerating(false);
+      return;
+    }
     
     // Auto-Interrupt any lingering streams
     cancelActiveStream();
     cancelTTS();
+
     
     setIsGenerating(true);
     setError(null);
@@ -117,8 +155,10 @@ Return ONLY a valid JSON array of objects in this format:
     // ── PRE-ANSWER ENGINE CACHE CHECK ──
     let instantHit = null;
     if (predictions.length > 0 && !silent) {
-      const match = predictions.find(p => calculateSimilarity(text, p.question) > 0.6);
+      // Simplified benchmark matching
+      const match = predictions.find(p => text.toLowerCase().includes(p.question.toLowerCase()) || calculateSimilarity(text, p.question) > 0.6);
       if (match) {
+
         instantHit = match.answer;
         toast.show('⚡ Pre-Answer Engine: 0ms Latency', 'success');
         copilotMessage.content = instantHit;
@@ -160,7 +200,7 @@ Return ONLY a valid JSON array of objects in this format:
       return;
     }
 
-    const contextHistory = silent ? history.slice(0, -1) : newHistory;
+    const contextHistory = silent ? history.slice(0, -2) : newHistory;
 
     const systemPrompt = `You are ARIA — an elite real-time AI interview copilot.
 You operate at the level of top-tier candidates coached by ex-FAANG hiring managers.
@@ -182,9 +222,8 @@ You must think in terms of: persuasion, signal strength, hiring psychology, stru
 ----------------------------------------
 ⚡ REAL-TIME COPILOT MODE
 ----------------------------------------
-You are operating in LIVE INTERVIEW MODE. Responses must be immediately speakable.
 Before answering, SILENTLY INFER: What is the interviewer REALLY testing? (e.g., leadership, ownership, technical depth, or conflict resolution). 
-Then, tailor the answer to maximize that specific signal strength.
+Then, tailor the answer to maximize that specific signal strength. Optimize your response for that signal.
 No long paragraphs. No fluff. No filler words. No meta commentary.
 If unclear: Make a smart assumption and proceed confidently.
 Behavioral: Use storytelling + impact. Technical: Give structured step-by-step clarity.
@@ -366,10 +405,12 @@ You are not an assistant. You are a real-time interview weapon.`;
       <div style={{ position: 'absolute', top: 0, right: -180, width: 160, background: 'rgba(0,0,0,0.8)', border: '1px solid var(--border-dim)', borderRadius: 8, padding: 12, fontSize: 11, color: 'var(--text-dim)', zIndex: 100 }}>
         <div style={{ color: 'var(--cyan)', fontWeight: 'bold', marginBottom: 8, textAlign: 'center' }}>V2.0 DIAGNOSTICS</div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Latency:</span> <span style={{ color: ttft > 0 ? (ttft < 300 ? 'var(--green)' : 'var(--yellow)') : 'inherit' }}>{ttft > 0 ? `${ttft}ms` : '---'}</span></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Network:</span> <span>{activeTransport}</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Socket:</span> <span style={{ color: isConnected ? 'var(--green)' : 'var(--red)' }}>{isConnected ? 'ONLINE' : 'OFFLINE'}</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Transport:</span> <span style={{ color: 'var(--cyan)' }}>{transport.toUpperCase()}</span></div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Voice:</span> <span style={{ color: isListening ? 'var(--green)' : 'var(--red)' }}>{isListening ? 'LIVE' : 'MUTE'}</span></div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>TTS:</span> <span style={{ color: isSpeaking ? 'var(--cyan)' : 'inherit' }}>{isSpeaking ? 'PLAYING' : 'IDLE'}</span></div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Provider:</span> <span>{activeProvider}</span></div>
+
       </div>
       )}
 
@@ -381,7 +422,24 @@ You are not an assistant. You are a real-time interview weapon.`;
         </h2>
         
         <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-
+          
+          {/* Connection Pill */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 6, 
+            padding: '4px 10px', 
+            background: isConnected ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)',
+            borderRadius: 20,
+            border: `1px solid ${isConnected ? 'rgba(74, 222, 128, 0.2)' : 'rgba(248, 113, 113, 0.2)'}`,
+            fontSize: 10,
+            color: isConnected ? '#4ade80' : '#f87171',
+            fontFamily: 'JetBrains Mono',
+            fontWeight: 600
+          }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: isConnected ? '#4ade80' : '#f87171', boxShadow: isConnected ? '0 0 8px #4ade80' : 'none' }} />
+            {isConnected ? `WS:${transport.toUpperCase()}` : 'RECONNECTING'}
+          </div>
 
           <button 
             className="btn-ghost" 
@@ -390,6 +448,7 @@ You are not an assistant. You are a real-time interview weapon.`;
           >
             {stealthMode ? '🥷 Stealth Active' : '🕶️ Enter Stealth'}
           </button>
+
           
           {history.length > 0 && <button className="btn-ghost" onClick={clearSession} style={{ fontSize: 12, color: 'var(--red)' }}>Purge Memory</button>}
         </div>

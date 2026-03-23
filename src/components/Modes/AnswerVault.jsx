@@ -21,7 +21,9 @@ const AnswerVault = () => {
   const categories = ['All', 'Live', 'Behavioral', 'Technical', 'Leadership', 'Failures'];
 
   const getFiltered = () => {
-    let result = savedAnswers;
+    const safeAnswers = Array.isArray(savedAnswers) ? savedAnswers : [];
+    let result = [...safeAnswers];
+    
     if (searchQuery) {
       result = searchAnswers(searchQuery);
     }
@@ -29,7 +31,7 @@ const AnswerVault = () => {
       result = filterByCategory(categoryFilter, result);
     }
     
-    // Sort
+    // Non-mutating Sort
     if (sortOrder === 'newest') {
       result.sort((a,b) => new Date(b.savedAt) - new Date(a.savedAt));
     } else if (sortOrder === 'score_high') {
@@ -115,7 +117,7 @@ const AnswerVault = () => {
             >
               {cat}
               <span style={{ opacity: 0.5, fontSize: 12 }}>
-                {cat === 'All' ? savedAnswers.length : savedAnswers.filter(a => a.category === cat).length}
+                {cat === 'All' ? (Array.isArray(savedAnswers) ? savedAnswers.length : 0) : (Array.isArray(savedAnswers) ? savedAnswers.filter(a => a.category === cat).length : 0)}
               </span>
             </button>
           ))}

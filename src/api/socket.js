@@ -5,26 +5,36 @@ import { config } from './config';
 // Initializes the global Socket.io instance. Natively handles auto-reconnects,
 // heartbeat pings, and hybrid SSE fallback. Connects strictly to the proxy.
 
-const SERVER_URL = config.apiUrl ? config.apiUrl.replace('/api', '') : 'http://localhost:3001';
+const SERVER_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+  ? 'http://localhost:3001' 
+  : `http://${window.location.hostname}:3001`;
 
 export const socket = io(SERVER_URL, {
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  timeout: 10000,
+  reconnection: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 2000,
+  timeout: 20000,
   autoConnect: true,
-  transports: ['websocket', 'polling'] // Prioritizes websocket -> falls back to SSE
+  transports: ['polling', 'websocket'], // Robust Hybrid: Polling-first handshake, then automatic WS upgrade
 });
+
 
 // Expose diagnostic listeners
 socket.on('connect', () => {
-  console.log('⚡ [WebSockets] Connected to ARIA Proxy Server (ID:', socket.id, ')');
+  console.log('⚡ [WebSockets] Connected and Hardened (ID:', socket.id, ')');
+  console.log('🔗 [WebSockets] Active Transport:', socket.io.engine.transport.name);
+});
+
+socket.on('reconnect_attempt', (attempt) => {
+  console.warn(`🔄 [WebSockets] Reconnection attempt #${attempt}...`);
+});
+
+socket.on('reconnect_failed', () => {
+  console.error('❌ [WebSockets] Critical: All reconnection attempts failed.');
 });
 
 socket.on('disconnect', (reason) => {
   console.warn('⚠️ [WebSockets] Disconnected:', reason);
 });
 
-socket.on('connect_error', (error) => {
-  console.error('❌ [WebSockets] Connection Error:', error.message);
-});

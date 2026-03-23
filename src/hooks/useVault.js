@@ -126,18 +126,18 @@ export const useVault = () => {
     : null;
 
   return {
-    answers,
+    savedAnswers: answers || [],
     saveAnswer,
     getAll,
     deleteAnswer,
     updateAnswer,
     searchAnswers,
     filterByTag,
-    getByCategory,
-    starAnswer,
-    exportAll,
-    totalCount: answers.length,
+    filterByCategory: getByCategory,
+    toggleStar: starAnswer,
+    exportVaultData: exportAll,
+    totalCount: (answers || []).length,
     averageScore,
-    starredCount: answers.filter(a => a.isStarred).length
+    starredCount: (answers || []).filter(a => a.isStarred).length
   };
 };

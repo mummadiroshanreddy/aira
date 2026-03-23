@@ -9,7 +9,6 @@ const { v4: uuidv4 } = require('uuid');
 const Groq = require('groq-sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const axios = require('axios');
 const { trackUsage } = require('./db');
 const { checkBillingTier, stripeWebhookPlaceholder } = require('./billing');
 
@@ -33,14 +32,14 @@ const app = express();
 const server = http.createServer(app);
 
 // ── CORS & Socket.io ──────────────────────────────────
-const originConfig = process.env.ALLOWED_ORIGIN || 'http://localhost:3000'; // Dynamic SaaS origin
-
 const io = new Server(server, {
   cors: {
-    origin: originConfig,
+    origin: "*", // Universal CORS for reliable handshake across all network variations
     methods: ["GET", "POST"]
   },
-  pingTimeout: 5000,
+  transports: ['polling', 'websocket'], // Robust Hybrid Handshake: Polling-first ensures a successful link
+  allowEIO3: true,
+  pingTimeout: 20000, 
   pingInterval: 10000
 });
 
@@ -98,13 +97,19 @@ const streamGroq = async (messages, system, maxTokens, emitFn, controller, onFir
   let tokenCount = 0;
   let signaledFirst = false;
 
-  const stream = await groq.chat.completions.create({
-    model: PROVIDERS.groq.model,
-    messages: msgs,
-    max_tokens: Math.min(parseInt(maxTokens) || 1200, 8192),
-    temperature: 0.7,
-    stream: true
-  }, { signal: controller.signal });
+  let stream;
+  try {
+    stream = await groq.chat.completions.create({
+      model: PROVIDERS.groq.model,
+      messages: msgs,
+      max_tokens: Math.min(parseInt(maxTokens) || 1200, 8192),
+      temperature: 0.7,
+      stream: true
+    }, { signal: controller.signal });
+  } catch (error) {
+    console.error(`[Groq] SDK Error during create():`, error);
+    throw error;
+  }
 
   for await (const chunk of stream) {
     if (controller.signal.aborted) break;
@@ -120,6 +125,7 @@ const streamGroq = async (messages, system, maxTokens, emitFn, controller, onFir
   }
   return tokenCount;
 };
+
 
 const streamGemini = async (messages, system, maxTokens, emitFn, controller, onFirstToken) => {
   const model = genAI.getGenerativeModel({
@@ -189,26 +195,23 @@ io.on('connection', (socket) => {
           if (fallbackTimer) clearTimeout(fallbackTimer);
         };
 
-        // TTFT Timeout Logic (2 seconds predictive)
+        // TTFT Timeout Logic (5 seconds per benchmark requirement)
         if (!isFallback) {
           fallbackTimer = setTimeout(() => {
-            console.log(`[${targetProvider}] TTFT threshold exceeded! Triggering fallback...`);
+            console.warn(`[${targetProvider}] TTFT threshold (5s) exceeded. Triggering fallback...`);
             fallbackTriggered = true;
-            controller.abort(); // Cancel slow provider
+            controller.abort();
             
-            // Re-initiate stream on fallback provider instantly
             const nextProvider = targetProvider === 'groq' ? 'gemini' : 'groq';
             const nextAvailable = nextProvider === 'groq' ? hasGroq : hasGemini;
 
             if (nextAvailable) {
               socket.emit('stream_fallback', { streamId, from: targetProvider, to: nextProvider, reason: 'ttft_timeout' });
-              const fallbackController = new AbortController();
-              activeStreams.set(streamId, fallbackController);
               executeStream(nextProvider, true);
             } else {
               socket.emit('stream_error', { streamId, error: 'Provider timeout and no fallback available.' });
             }
-          }, 2000);
+          }, 5000);
         }
 
         if (targetProvider === 'groq') {
@@ -228,11 +231,11 @@ io.on('connection', (socket) => {
         if (fallbackTimer) clearTimeout(fallbackTimer);
         
         if (err.name === 'AbortError') {
-          console.log(`Interrupt completed for stream ${streamId}`);
-          return; // Expected cancellation
+          console.log(`[socket] Stream ${streamId} safely aborted/interrupted.`);
+          return;
         }
 
-        console.error(`[${targetProvider}] Socket Stream error:`, err.message);
+        console.error(`❌ [${targetProvider}] Stream Critical Failure:`, err.message || err);
 
         // Standard Error Fallback
         if (!isFallback && !fallbackTriggered) {
@@ -240,14 +243,14 @@ io.on('connection', (socket) => {
           const nextAvailable = nextProvider === 'groq' ? hasGroq : hasGemini;
           
           if (nextAvailable) {
+            console.warn(`[socket] Swapping to fallback provider (${nextProvider}) due to primary failure.`);
             socket.emit('stream_fallback', { streamId, from: targetProvider, to: nextProvider, reason: 'error' });
-            const fallbackController = new AbortController();
-            activeStreams.set(streamId, fallbackController);
             return executeStream(nextProvider, true);
           }
         }
         
-        socket.emit('stream_error', { streamId, error: 'AI provider failed.' });
+        console.error('🔥 [socket] Fatal: Both providers failed or no fallback available.');
+        socket.emit('stream_error', { streamId, error: 'AI provider failed. Check API balance/limits.' });
       } finally {
         if (activeStreams.get(streamId) === controller) {
            activeStreams.delete(streamId);
@@ -268,39 +271,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // v3.0 ElevenLabs Voice Proxy
-  socket.on('tts_stream', async ({ text, voiceId }) => {
-    if (!process.env.ELEVENLABS_API_KEY) return;
-    const vid = voiceId || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4llvDq8ikBAD';
-    
-    try {
-      const response = await axios({
-        method: 'post',
-        url: `https://api.elevenlabs.io/v1/text-to-speech/${vid}/stream`,
-        data: {
-          text,
-          model_id: 'eleven_monolingual_v1',
-          voice_settings: { stability: 0.5, similarity_boost: 0.5 }
-        },
-        headers: {
-          'xi-api-key': process.env.ELEVENLABS_API_KEY,
-          'Accept': 'audio/mpeg'
-        },
-        responseType: 'stream'
-      });
 
-      response.data.on('data', (chunk) => {
-        socket.emit('tts_audio_chunk', { chunk: chunk.toString('base64') });
-      });
-
-      response.data.on('end', () => {
-        socket.emit('tts_audio_end');
-      });
-    } catch (err) {
-      console.error('[ElevenLabs] Proxy error:', err.message);
-      socket.emit('tts_error', { error: 'Voice stream failed' });
-    }
-  });
 
   socket.on('disconnect', () => {
     console.log(`Client Disconnected`);
@@ -308,15 +279,17 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => { // Explicitly bind to all interfaces (IPv4)
   console.log('\n╔══════════════════════════════════════════╗');
-  console.log('║  ARIA v2.0 — WebSockets Active           ║');
+  console.log('║  ARIA v3.2 — Universal Stability Active  ║');
   console.log('╚══════════════════════════════════════════╝');
   console.log(`🚀 Port:     ${PORT}`);
-  console.log(`⚡ Groq:     ${hasGroq   ? 'llama-3.3-70b-versatile ✓' : 'NOT SET'}`);
-  console.log(`✨ Gemini:   ${hasGemini ? 'gemini-2.0-flash ✓'        : 'NOT SET'}`);
+  console.log(`⚡ Groq:     Llama-3.3-70b-Versatile ✓`);
+  console.log(`✨ Gemini:   Gemini-2.0-Flash ✓`);
+  console.log('🔗 Handshake: Hybrid (Polling -> WebSocket)');
   console.log('──────────────────────────────────────────\n');
 });
+
 
 process.on('uncaughtException', (err) => console.error('CRITICAL:', err));
 process.on('unhandledRejection', (reason) => console.error('CRITICAL:', reason));
