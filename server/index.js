@@ -47,9 +47,23 @@ const io = new Server(server, {
 // critical for instantly killing AI generation on barge-in
 const activeStreams = new Map();
 
+// ── CORS Config ───────────────────────────────────────
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'];
+
+const originConfig = (origin, callback) => {
+  // Allow requests with no origin (curl, Postman, same-origin)
+  if (!origin) return callback(null, true);
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+  return callback(new Error(`CORS blocked: ${origin}`));
+};
+
 // ── Middleware ────────────────────────────────────────
-app.use(helmet());
-app.use(cors({ origin: originConfig, preflightContinue: false, optionsSuccessStatus: 204 }));
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(cors({ origin: originConfig, preflightContinue: false, optionsSuccessStatus: 204, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 3600000,
@@ -76,6 +90,41 @@ app.get('/api/providers', (req, res) => {
 });
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// ── Resume File Parser ────────────────────────────────
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'text/plain'];
+    if (allowed.includes(file.mimetype) || file.originalname.match(/\.(txt|pdf)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF and TXT files are supported'), false);
+    }
+  }
+});
+
+app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    let text = '';
+    if (req.file.mimetype === 'application/pdf' || req.file.originalname.endsWith('.pdf')) {
+      const data = await pdfParse(req.file.buffer);
+      text = data.text;
+    } else {
+      text = req.file.buffer.toString('utf-8');
+    }
+    // Clean up whitespace
+    text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+    res.json({ text, filename: req.file.originalname, chars: text.length });
+  } catch (err) {
+    console.error('[parse-resume] Error:', err.message);
+    res.status(500).json({ error: 'Failed to parse file. Please paste your resume text manually.' });
+  }
+});
 
 const validateRequest = (body) => {
   if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) return 'messages array required';

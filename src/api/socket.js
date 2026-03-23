@@ -1,13 +1,22 @@
 import { io } from 'socket.io-client';
-import { config } from './config';
 
 // ── Shared WebSocket Client ───────────────────────────
-// Initializes the global Socket.io instance. Natively handles auto-reconnects,
-// heartbeat pings, and hybrid SSE fallback. Connects strictly to the proxy.
+// Handles localhost dev and production deployments (HTTP & HTTPS).
 
-const SERVER_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-  ? 'http://localhost:3001' 
-  : `http://${window.location.hostname}:3001`;
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+// In production, the server and client are typically on the same host.
+// In dev, the server runs on port 3001 separately.
+let SERVER_URL;
+if (isLocal) {
+  SERVER_URL = 'http://localhost:3001';
+} else if (process.env.REACT_APP_SERVER_URL) {
+  SERVER_URL = process.env.REACT_APP_SERVER_URL;
+} else {
+  // Same host, different port (e.g., VPS deploy with server on 3001)
+  const protocol = window.location.protocol; // https: or http:
+  SERVER_URL = `${protocol}//${window.location.hostname}:3001`;
+}
 
 export const socket = io(SERVER_URL, {
   reconnection: true,
@@ -16,7 +25,7 @@ export const socket = io(SERVER_URL, {
   reconnectionDelayMax: 2000,
   timeout: 20000,
   autoConnect: true,
-  transports: ['polling', 'websocket'], // Robust Hybrid: Polling-first handshake, then automatic WS upgrade
+  transports: ['polling', 'websocket'], // Polling-first ensures reliable handshake, then auto-upgrade
 });
 
 
@@ -37,4 +46,3 @@ socket.on('reconnect_failed', () => {
 socket.on('disconnect', (reason) => {
   console.warn('⚠️ [WebSockets] Disconnected:', reason);
 });
-

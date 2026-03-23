@@ -2,11 +2,14 @@
 // FILE: src/components/Setup/SetupScreen.jsx
 // ════════════════════════════════
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 const SetupScreen = ({ onComplete }) => {
   const [step, setStep] = useState(1);
   const [returningUser, setReturningUser] = useState(false);
+  const [resumeFileName, setResumeFileName] = useState('');
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const fileInputRef = useRef(null);
   const [data, setData] = useState({
     name: '',
     role: '',
@@ -28,6 +31,61 @@ const SetupScreen = ({ onComplete }) => {
 
   const handleChange = (field, val) => {
     setData(prev => ({ ...prev, [field]: val }));
+  };
+
+  const handleResumeFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ['text/plain', 'application/pdf'];
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(txt|pdf)$/i)) {
+      alert('Please upload a .txt or .pdf file. For .doc/.docx, copy and paste the text instead.');
+      return;
+    }
+
+    setResumeUploading(true);
+    setResumeFileName(file.name);
+
+    try {
+      // Try server-side parse first (handles PDF text extraction properly)
+      const formData = new FormData();
+      formData.append('resume', file);
+
+      // Dynamically detect server API URL
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiUrl = isLocal 
+        ? 'http://localhost:3001/api' 
+        : `${window.location.protocol}//${window.location.hostname}:3001/api`;
+
+      const res = await fetch(`${apiUrl}/parse-resume`, { method: 'POST', body: formData });
+
+      if (res.ok) {
+        const result = await res.json();
+        handleChange('resume', result.text);
+        setResumeUploading(false);
+        return;
+      }
+    } catch (_) {
+      // Server unavailable — fall back to client-side read
+    }
+
+    // Client-side fallback for plain text
+    if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        handleChange('resume', evt.target.result || '');
+        setResumeUploading(false);
+      };
+      reader.onerror = () => {
+        alert('Failed to read file. Please paste your resume text manually.');
+        setResumeUploading(false);
+      };
+      reader.readAsText(file);
+    } else {
+      // PDF without server — store note
+      handleChange('resume', `[PDF uploaded: ${file.name} — server parsing unavailable, please paste key highlights below]`);
+      setResumeUploading(false);
+    }
   };
 
   const isStep1Valid = data.name.trim() !== '' && data.role.trim() !== '';
@@ -171,7 +229,58 @@ const SetupScreen = ({ onComplete }) => {
                     <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>YOUR RESUME / BIO</span>
                     <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>OPTIONAL</span>
                   </label>
-                  <textarea className="aria-input" value={data.resume} onChange={e=>handleChange('resume', e.target.value)} placeholder="Paste your resume text here to allow ARIA to draw from your actual experience..." rows={8} style={{ resize: 'vertical' }} />
+                  
+                  {/* File Upload Button */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.pdf,.doc,.docx"
+                    onChange={handleResumeFile}
+                    style={{ display: 'none' }}
+                  />
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      border: '1px dashed var(--border-dim)',
+                      borderRadius: 8,
+                      padding: '12px 16px',
+                      marginBottom: 10,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      background: resumeFileName ? 'rgba(0, 240, 255, 0.05)' : 'transparent',
+                      transition: 'all 0.2s',
+                      color: resumeFileName ? 'var(--cyan)' : 'var(--text-dim)',
+                      fontSize: 13,
+                      fontFamily: 'JetBrains Mono'
+                    }}
+                  >
+                    <span style={{ fontSize: 16 }}>{resumeUploading ? '⏳' : resumeFileName ? '📄' : '📎'}</span>
+                    <span>
+                      {resumeUploading
+                        ? 'Reading file...'
+                        : resumeFileName
+                          ? `Uploaded: ${resumeFileName}`
+                          : 'Click to upload resume (.txt, .pdf, .doc, .docx)'}
+                    </span>
+                    {resumeFileName && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); setResumeFileName(''); handleChange('resume', ''); }}
+                        style={{ marginLeft: 'auto', color: 'var(--red)', cursor: 'pointer', fontSize: 14 }}
+                        title="Remove file"
+                      >✕</span>
+                    )}
+                  </div>
+
+                  <textarea
+                    className="aria-input"
+                    value={data.resume}
+                    onChange={e => handleChange('resume', e.target.value)}
+                    placeholder="Or paste your resume text / key highlights here..."
+                    rows={6}
+                    style={{ resize: 'vertical' }}
+                  />
                 </div>
 
                 <div style={{ marginBottom: 40 }}>
