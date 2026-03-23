@@ -1,0 +1,11 @@
+{
+  "users": {
+    "anonymous": {
+      "requests": 2,
+      "tokensUsed": 578,
+      "totalSessionMs": 0,
+      "tier": "free",
+      "stripeCustomerId": null
+    }
+  }
+}

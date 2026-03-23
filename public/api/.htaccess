@@ -1,0 +1,20 @@
+Options -Indexes
+Options -ExecCGI
+
+# Only allow access to proxy.php
+<Files "proxy.php">
+    Order Allow,Deny
+    Allow from all
+</Files>
+
+# Block everything else
+<FilesMatch "^(?!proxy\.php$)">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Prevent direct access to .env.php
+<Files ".env.php">
+    Order Deny,Allow
+    Deny from all
+</Files>
