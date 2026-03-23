@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const Groq = require('groq-sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Load Abstraction Layers
+const axios = require('axios');
 const { trackUsage } = require('./db');
 const { checkBillingTier, stripeWebhookPlaceholder } = require('./billing');
 
@@ -265,6 +265,40 @@ io.on('connection', (socket) => {
       console.log(`[barge-in] Hard stopping stream: ${streamId}`);
       activeStreams.get(streamId).abort();
       activeStreams.delete(streamId);
+    }
+  });
+
+  // v3.0 ElevenLabs Voice Proxy
+  socket.on('tts_stream', async ({ text, voiceId }) => {
+    if (!process.env.ELEVENLABS_API_KEY) return;
+    const vid = voiceId || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4llvDq8ikBAD';
+    
+    try {
+      const response = await axios({
+        method: 'post',
+        url: `https://api.elevenlabs.io/v1/text-to-speech/${vid}/stream`,
+        data: {
+          text,
+          model_id: 'eleven_monolingual_v1',
+          voice_settings: { stability: 0.5, similarity_boost: 0.5 }
+        },
+        headers: {
+          'xi-api-key': process.env.ELEVENLABS_API_KEY,
+          'Accept': 'audio/mpeg'
+        },
+        responseType: 'stream'
+      });
+
+      response.data.on('data', (chunk) => {
+        socket.emit('tts_audio_chunk', { chunk: chunk.toString('base64') });
+      });
+
+      response.data.on('end', () => {
+        socket.emit('tts_audio_end');
+      });
+    } catch (err) {
+      console.error('[ElevenLabs] Proxy error:', err.message);
+      socket.emit('tts_error', { error: 'Voice stream failed' });
     }
   });
 

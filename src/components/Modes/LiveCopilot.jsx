@@ -30,7 +30,7 @@ const LiveCopilot = () => {
   const messagesEndRef = useRef(null);
   const requestStartTimeRef = useRef(0);
 
-  const { speakChunk, flush, cancel: cancelTTS, isSpeaking } = useTTS();
+  const { speakChunk, flush, cancel: cancelTTS, isSpeaking, setTtsMode, ttsMode } = useTTS();
 
   const handleSilenceFinal = (stableText) => {
     if (stableText.trim().length > 3) {
@@ -168,9 +168,10 @@ You must think in terms of: persuasion, signal strength, hiring psychology, stru
 ⚡ REAL-TIME COPILOT MODE
 ----------------------------------------
 You are operating in LIVE INTERVIEW MODE. Responses must be immediately speakable.
+Before answering, SILENTLY INFER: What is the interviewer REALLY testing? (e.g., leadership, ownership, technical depth, or conflict resolution). 
+Then, tailor the answer to maximize that specific signal strength.
 No long paragraphs. No fluff. No filler words. No meta commentary.
 If unclear: Make a smart assumption and proceed confidently.
-Before answering, quickly infer: What is the interviewer REALLY testing? Tailor the answer to that signal.
 Behavioral: Use storytelling + impact. Technical: Give structured step-by-step clarity.
 
 ----------------------------------------
@@ -254,6 +255,18 @@ You are not an assistant. You are a real-time interview weapon.`;
           setIsGenerating(false);
           flush(); // flush any remaining TTS tokens
           setLastUsedProvider(activeProvider || 'groq');
+
+          // ── WEAK ANSWER DETECTOR (v3.0) ──
+          const sectionsCount = fullText.split(/(?=⚡|🎯|📍|🔥)/g).length;
+          if (fullText.length < 150 || sectionsCount < 4) {
+            console.warn('[ARIA] Weak answer detected. Auto-regenerating...');
+            toast.show('Refining answer for impact...', 'info');
+            // Re-submit with a hidden 'strengthen' instruction
+            setTimeout(() => {
+              submitQuestion(`${text} (Provide a much deeper, more metrics-driven and confident answer)`);
+            }, 500);
+            return;
+          }
           
           setTimeout(() => {
              const updatedHist = [...newHistory, { role: 'assistant', content: fullText }];
@@ -299,22 +312,39 @@ You are not an assistant. You are a real-time interview weapon.`;
 
   return (
     <div style={{ 
-        maxWidth: stealthMode ? 550 : 900, 
-        margin: stealthMode ? '0 0 0 auto' : '0 auto', 
+        maxWidth: stealthMode ? '100vw' : 900, 
+        margin: stealthMode ? '0' : '0 auto', 
         display: 'flex', 
-        flexDirection: 'column', 
-        gap: stealthMode ? 16 : 24, 
+        flexDirection: stealthMode ? 'row' : 'column', 
+        gap: stealthMode ? 0 : 24, 
         position: 'relative',
         transition: 'all 0.3s ease',
         background: stealthMode ? stealthTheme.bg : 'transparent',
-        padding: stealthMode ? '24px 32px' : '0',
-        borderRadius: stealthMode ? '16px' : '0',
+        padding: stealthMode ? '0' : '0',
+        borderRadius: stealthMode ? '0' : '0',
         fontFamily: stealthMode ? stealthTheme.font : 'inherit',
         color: stealthMode ? stealthTheme.text : 'inherit',
         boxShadow: stealthMode ? '0 10px 40px rgba(0,0,0,0.2)' : 'none',
-        height: stealthMode ? 'calc(100vh - 40px)' : 'auto',
-        overflowY: stealthMode ? 'auto' : 'visible'
+        height: stealthMode ? '100vh' : 'auto',
+        overflowY: stealthMode ? 'hidden' : 'visible',
+        position: 'fixed',
+        top: stealthMode ? 0 : 'auto',
+        left: stealthMode ? 0 : 'auto',
+        width: stealthMode ? '100%' : '100%',
+        zIndex: stealthMode ? 1000 : 1
     }}>
+
+      {stealthMode && (
+        <div style={{ width: 220, background: '#F3F4F6', borderRight: `1px solid ${stealthTheme.border}`, padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 'bold', color: stealthTheme.dim, letterSpacing: 1 }}>FOLDERS</div>
+          <div style={{ color: stealthTheme.accent, fontWeight: 600 }}>📝 Interview Notes</div>
+          <div style={{ color: stealthTheme.dim }}>📁 Projects</div>
+          <div style={{ color: stealthTheme.dim }}>📁 Personal</div>
+          <div style={{ marginTop: 'auto', fontSize: 10, color: stealthTheme.dim }}>v3.0 Secure Node</div>
+        </div>
+      )}
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: stealthMode ? '24px 48px' : '0', overflowY: 'auto', gap: stealthMode ? 16 : 24 }}>
 
       {/* DEBUG HUD PANEL (Part 15) */}
       {!stealthMode && (
@@ -336,6 +366,14 @@ You are not an assistant. You are a real-time interview weapon.`;
         </h2>
         
         <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+          <button 
+            className="btn-ghost" 
+            onClick={() => setTtsMode(ttsMode === 'native' ? 'elevenlabs' : 'native')} 
+            style={{ fontSize: 12, color: ttsMode === 'elevenlabs' ? 'var(--orange)' : 'var(--text-dim)', background: ttsMode === 'elevenlabs' ? 'rgba(255, 165, 0, 0.05)' : 'transparent', padding: '6px 12px', borderRadius: 4 }}
+          >
+            {ttsMode === 'elevenlabs' ? '🔊 ElevenLabs' : '🎙️ Native'}
+          </button>
+
           <button 
             className="btn-ghost" 
             onClick={() => setStealthMode(!stealthMode)} 

@@ -1,8 +1,8 @@
 {
   "users": {
     "anonymous": {
-      "requests": 2,
-      "tokensUsed": 578,
+      "requests": 13,
+      "tokensUsed": 3232,
       "totalSessionMs": 0,
       "tier": "free",
       "stripeCustomerId": null

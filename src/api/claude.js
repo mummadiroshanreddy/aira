@@ -32,13 +32,17 @@ const buildPayload = (systemPrompt, messages, stream = false) => ({
 });
 
 const buildMessages = (history = [], userMessage) => {
-  const limitedHistory = history.slice(-12);
-  const messages = [...limitedHistory];
-  if (userMessage) messages.push({ role: 'user', content: userMessage });
-  return messages.map(msg => {
-    if (typeof msg.content !== 'string') msg.content = JSON.stringify(msg.content);
-    return msg;
-  });
+  const messages = [...history];
+  
+  // If userMessage is provided, only append it if the last message isn't already this exact user prompt
+  if (userMessage && (messages.length === 0 || messages[messages.length - 1].content !== userMessage)) {
+    messages.push({ role: 'user', content: userMessage });
+  }
+
+  return messages
+    .filter(msg => msg && msg.role && msg.content && typeof msg.content === 'string' && msg.content.trim().length > 0)
+    .slice(-12)
+    .map(msg => ({ role: msg.role, content: msg.content }));
 };
 
 export const checkProxyHealth = async () => {

@@ -1,13 +1,51 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
+import { socket } from '../api/socket';
 
-// ── Native Streaming Text-To-Speech Engine ────────────
-// Buffers incoming tokens and plays them dynamically at sentence boundaries.
-// Bypasses the need for expensive, latency-heavy external TTS APIs.
-
+// ── Native + ElevenLabs Text-To-Speech Hook ────────────
 export const useTTS = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsMode, setTtsMode] = useState('native'); // 'native' or 'elevenlabs'
   const bufferRef = useRef('');
   const activeUtterances = useRef(0);
+  const audioQueue = useRef([]);
+  const isAudioPlaying = useRef(false);
+
+  // Play ElevenLabs audio chunk queue
+  const playNextInQueue = useCallback(() => {
+    if (audioQueue.current.length === 0) {
+      isAudioPlaying.current = false;
+      setIsSpeaking(false);
+      return;
+    }
+    
+    isAudioPlaying.current = true;
+    setIsSpeaking(true);
+    const base64 = audioQueue.current.shift();
+    const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
+    audio.onended = playNextInQueue;
+    audio.onerror = playNextInQueue;
+    audio.play().catch(e => {
+        console.error('[TTS] Playback error:', e);
+        playNextInQueue();
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleChunk = ({ chunk }) => {
+      audioQueue.current.push(chunk);
+      if (!isAudioPlaying.current) playNextInQueue();
+    };
+    
+    const handleEnd = () => {}; // Could trigger cleanup
+    
+    socket.on('tts_audio_chunk', handleChunk);
+    socket.on('tts_audio_end', handleEnd);
+    
+    return () => {
+      socket.off('tts_audio_chunk', handleChunk);
+      socket.off('tts_audio_end', handleEnd);
+    };
+  }, [playNextInQueue]);
 
   // Load voices proactively on mount
   useEffect(() => {
@@ -23,6 +61,10 @@ export const useTTS = () => {
   };
 
   const dispatchSpeech = (text) => {
+    if (ttsMode === 'elevenlabs') {
+      socket.emit('tts_stream', { text });
+      return;
+    }
     if (!('speechSynthesis' in window) || !text.trim()) return;
 
     const utterance = new SpeechSynthesisUtterance(text.trim());
@@ -80,7 +122,10 @@ export const useTTS = () => {
       activeUtterances.current = 0;
       setIsSpeaking(false);
     }
+    // Deep stop for ElevenLabs
+    audioQueue.current = [];
+    isAudioPlaying.current = false;
   }, []);
 
-  return { speakChunk, flush, cancel, isSpeaking };
+  return { speakChunk, flush, cancel, isSpeaking, setTtsMode, ttsMode };
 };

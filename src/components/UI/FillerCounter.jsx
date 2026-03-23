@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSpeech } from '../../hooks/useSpeech';
 
 const FillerCounter = () => {
-  const { isListening, stopListening, startListening, fillerWords } = useSpeech();
+  const { isListening, stopListening, startListening, fillerWords = {} } = useSpeech();
 
   useEffect(() => {
     if (!isListening) {
