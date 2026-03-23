@@ -30,7 +30,7 @@ const LiveCopilot = () => {
   const messagesEndRef = useRef(null);
   const requestStartTimeRef = useRef(0);
 
-  const { speakChunk, flush, cancel: cancelTTS, isSpeaking, setTtsMode, ttsMode } = useTTS();
+  const { speakChunk, flush, cancel: cancelTTS, isSpeaking } = useTTS();
 
   const handleSilenceFinal = (stableText) => {
     if (stableText.trim().length > 3) {
@@ -99,7 +99,7 @@ Return ONLY a valid JSON array of objects in this format:
     } catch(e) { } finally { setIsPredicting(false); }
   };
 
-  const submitQuestion = async (text) => {
+  const submitQuestion = async (text, silent = false) => {
     if (!text || typeof text !== 'string' || !text.trim()) return;
     
     // Auto-Interrupt any lingering streams
@@ -116,7 +116,7 @@ Return ONLY a valid JSON array of objects in this format:
 
     // ── PRE-ANSWER ENGINE CACHE CHECK ──
     let instantHit = null;
-    if (predictions.length > 0) {
+    if (predictions.length > 0 && !silent) {
       const match = predictions.find(p => calculateSimilarity(text, p.question) > 0.6);
       if (match) {
         instantHit = match.answer;
@@ -135,8 +135,21 @@ Return ONLY a valid JSON array of objects in this format:
       }
     }
 
-    const newHistory = [...history, newMessage];
-    setHistory([...newHistory, copilotMessage]);
+    const newHistory = [...history];
+    if (!silent) {
+       newHistory.push(newMessage);
+       setHistory([...newHistory, copilotMessage]);
+    } else {
+       // In silent mode, we replace the content of the LAST assistant message instead of pushing new ones
+       setHistory(prev => {
+         const updated = [...prev];
+         if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+           updated[updated.length - 1].content = '';
+           updated[updated.length - 1].sections = [];
+         }
+         return updated;
+       });
+    }
 
     if (instantHit) {
       speakChunk(instantHit);
@@ -146,6 +159,8 @@ Return ONLY a valid JSON array of objects in this format:
       setTimeout(() => preGenerateNextQuestions([...newHistory, copilotMessage]), 100);
       return;
     }
+
+    const contextHistory = silent ? history.slice(0, -1) : newHistory;
 
     const systemPrompt = `You are ARIA — an elite real-time AI interview copilot.
 You operate at the level of top-tier candidates coached by ex-FAANG hiring managers.
@@ -212,7 +227,7 @@ You are not an assistant. You are a real-time interview weapon.`;
       await streamClaude(
         systemPrompt, 
         text, 
-        newHistory.map(m => ({ role: m.role, content: m.content })),
+        contextHistory.map(m => ({ role: m.role, content: m.content })),
         activeProvider || 'groq',
         (chunk) => {
           // TTFT Calculate
@@ -261,9 +276,9 @@ You are not an assistant. You are a real-time interview weapon.`;
           if (fullText.length < 150 || sectionsCount < 4) {
             console.warn('[ARIA] Weak answer detected. Auto-regenerating...');
             toast.show('Refining answer for impact...', 'info');
-            // Re-submit with a hidden 'strengthen' instruction
+            // Re-submit with a silent 'strengthen' instruction
             setTimeout(() => {
-              submitQuestion(`${text} (Provide a much deeper, more metrics-driven and confident answer)`);
+              submitQuestion(`${text} (Provide a much deeper, more metrics-driven and confident answer)`, true);
             }, 500);
             return;
           }
@@ -366,13 +381,7 @@ You are not an assistant. You are a real-time interview weapon.`;
         </h2>
         
         <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <button 
-            className="btn-ghost" 
-            onClick={() => setTtsMode(ttsMode === 'native' ? 'elevenlabs' : 'native')} 
-            style={{ fontSize: 12, color: ttsMode === 'elevenlabs' ? 'var(--orange)' : 'var(--text-dim)', background: ttsMode === 'elevenlabs' ? 'rgba(255, 165, 0, 0.05)' : 'transparent', padding: '6px 12px', borderRadius: 4 }}
-          >
-            {ttsMode === 'elevenlabs' ? '🔊 ElevenLabs' : '🎙️ Native'}
-          </button>
+
 
           <button 
             className="btn-ghost" 
@@ -488,7 +497,8 @@ You are not an assistant. You are a real-time interview weapon.`;
         <div ref={messagesEndRef} style={{ height: 40 }} />
       </div>
     </div>
-  );
+  </div>
+);
 };
 
 export default LiveCopilot;
