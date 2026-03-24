@@ -246,11 +246,16 @@ io.on('connection', (socket) => {
   console.log(`Socket Connected: ${socket.id}`);
 
   socket.on('chat_stream', async (payload) => {
+    console.log(`[socket] chat_stream event | user: ${payload.userId} | provider: ${payload.provider}`);
     const validationError = validateRequest(payload);
-    if (validationError) return socket.emit('stream_error', { error: validationError });
+    if (validationError) {
+      console.error(`[socket] Validation failed: ${validationError}`);
+      return socket.emit('stream_error', { error: validationError });
+    }
 
     const { messages, system, max_tokens, provider = 'groq', userId = 'anonymous' } = payload;
     const streamId = uuidv4();
+    console.log(`[socket] Stream started: ${streamId}`);
 
     const activeProvider = (provider === 'groq' && hasGroq) ? 'groq'
       : (provider === 'gemini' && hasGemini) ? 'gemini'
@@ -268,6 +273,7 @@ io.on('connection', (socket) => {
 
     const executeStream = async (targetProvider, isFallback = false) => {
       try {
+        console.log(`[socket] Executing ${targetProvider} | isFallback: ${isFallback}`);
         let tokensUsed = 0;
         const onFirstToken = () => { if (fallbackTimer) clearTimeout(fallbackTimer); };
 

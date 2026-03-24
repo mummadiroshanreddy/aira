@@ -55,9 +55,9 @@ export const streamAI = (prompt, callbacks = {}) => {
     const resetTimeout = () => {
       if (chunkTimeout) clearTimeout(chunkTimeout);
       chunkTimeout = setTimeout(() => {
-        const error = "Socket timeout: No chunk received in 5s. Check connection.";
+        const error = "Socket timeout: No chunk received in 8s. Check connection.";
         handleError({ streamId, error });
-      }, 5000);
+      }, 8000);
     };
 
     const handleStart = ({ streamId: id, provider: serverProvider }) => {
