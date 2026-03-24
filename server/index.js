@@ -1,4 +1,3 @@
-const fs = require('fs');
 require('dotenv').config();
 const http = require('http');
 const express = require('express');
@@ -9,245 +8,293 @@ const { Server } = require('socket.io');
 const { v4: uuidv4 } = require('uuid');
 const Groq = require('groq-sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const multer = require('multer');
-const pdfParse = require('pdf-parse');
-const mammoth = require('mammoth');
-const axios = require('axios');
 
-// ── Environment Verification ──────────────────────────
+const { trackUsage } = require('./db');
+const { checkBillingTier, stripeWebhookPlaceholder } = require('./billing');
+
+// ── Validate keys on startup ──────────────────────────
+if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) {
+  console.error('FATAL: No API keys set. Add GROQ_API_KEY or GEMINI_API_KEY to server/.env');
+  process.exit(1);
+}
+
 const hasGroq = !!process.env.GROQ_API_KEY;
 const hasGemini = !!process.env.GEMINI_API_KEY;
 
 console.log(`\n🔑 Groq:   ${hasGroq   ? 'SET ✓' : 'NOT SET ✗'}`);
 console.log(`🔑 Gemini: ${hasGemini ? 'SET ✓' : 'NOT SET ✗'}\n`);
 
-// ── Initialize Clients ────────────────────────────────
-const groq = hasGroq ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+// ── Initialize AI clients ─────────────────────────────
+const groq  = hasGroq   ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const genAI = hasGemini ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
 const app = express();
 const server = http.createServer(app);
 
-// ── WebSocket Heartbeat logic ─────────────────────────
+// ── Socket.io ─────────────────────────────────────────
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['polling', 'websocket'],
   allowEIO3: true,
-  pingTimeout: 30000, 
+  pingTimeout: 30000,
   pingInterval: 10000
 });
 
-// ── Resume Store (Simple in-memory) ───────────────────
-const resumeSummaries = new Map();
+// ── Active stream interrupt map ───────────────────────
+const activeStreams = new Map();
+
+// ── CORS Config ───────────────────────────────────────
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'];
+
+const originConfig = (origin, callback) => {
+  if (!origin) return callback(null, true);
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return callback(null, true);
+  return callback(new Error(`CORS blocked: ${origin}`));
+};
 
 // ── Middleware ────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: '2mb' }));
+app.use(cors({ origin: originConfig, preflightContinue: false, optionsSuccessStatus: 204, credentials: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 3600000,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 200,
+  message: { error: 'Rate limit exceeded.' },
+  standardHeaders: true,
+  legacyHeaders: false
+}));
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }
-});
+// ── Billing webhook placeholder ───────────────────────
+app.post('/api/billing/webhook', stripeWebhookPlaceholder);
 
-// ── Provider Config ───────────────────────────────────
+// ── Provider config ───────────────────────────────────
 const PROVIDERS = {
-  groq: { name: "⚡ Groq", model: "llama-3.3-70b-versatile", available: hasGroq },
-  gemini: { name: "🧠 Gemini", model: "gemini-2.0-flash", available: hasGemini },
-  ollama: { name: "🖥️ Local (Ollama)", model: "llama3", available: true }
+  groq:   { name: 'Groq',   model: 'llama-3.3-70b-versatile', available: hasGroq,   speed: 'Fastest', badge: '⚡' },
+  gemini: { name: 'Gemini', model: 'gemini-2.0-flash',        available: hasGemini, speed: 'Fast',    badge: '✨' }
 };
 
-// ── Helper: Provider Summary Generator ────────────────
-const generateResumeSummary = async (text) => {
-  try {
-    const prompt = `Summarize this resume for an AI interview copilot. 
-    Focus on key skills, years of experience, and top 3 achievements. 
-    Keep it under 500 tokens. 
-    Text: ${text.substring(0, 8000)}`;
-
-    if (hasGroq) {
-      const chat = await groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "system", content: "You are a recruitment assistant." }, { role: "user", content: prompt }],
-        max_tokens: 500
-      });
-      return chat.choices[0].message.content;
-    } else if (hasGemini) {
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const result = await model.generateContent(prompt);
-      return result.response.text();
-    }
-    return text.substring(0, 1500); // Fallback to raw truncation
-  } catch (err) {
-    console.warn("Summary generation failed, using truncation.");
-    return text.substring(0, 1500);
-  }
-};
-
-// ── Routes ────────────────────────────────────────────
-app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file' });
-  try {
-    let text = '';
-    const ext = req.file.originalname.split('.').pop().toLowerCase();
-
-    if (ext === 'pdf') {
-      const data = await pdfParse(req.file.buffer);
-      text = data.text;
-    } else if (ext === 'docx') {
-      const data = await mammoth.extractRawText({ buffer: req.file.buffer });
-      text = data.value;
-    } else {
-      text = req.file.buffer.toString('utf-8');
-    }
-
-    const summary = await generateResumeSummary(text);
-    const userId = req.body.userId || 'anonymous';
-    resumeSummaries.set(userId, summary);
-
-    res.json({ success: true, summary, filename: req.file.originalname });
-  } catch (err) {
-    console.error("Parse Error:", err);
-    res.status(500).json({ error: err.message });
-  }
+app.get('/api/providers', (req, res) => {
+  res.json({
+    available: Object.entries(PROVIDERS)
+      .filter(([, p]) => p.available)
+      .map(([id, p]) => ({ id, ...p })),
+    default: hasGroq ? 'groq' : 'gemini'
+  });
 });
 
-// ── Provider Streaming Handlers ───────────────────────
+app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-const streamGroq = async (fullPrompt, messages, socket) => {
+// ── Resume File Parser ────────────────────────────────
+let multer, pdfParse;
+try {
+  multer = require('multer');
+  pdfParse = require('pdf-parse');
+} catch (_) {
+  console.warn('⚠️  multer/pdf-parse not installed. Run: npm install multer pdf-parse');
+}
+
+if (multer && pdfParse) {
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      if (['application/pdf', 'text/plain'].includes(file.mimetype) || file.originalname.match(/\.(txt|pdf|docx?)$/i)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only PDF/TXT/DOCX files are supported'), false);
+      }
+    }
+  });
+
+  app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    try {
+      let text = '';
+      if (req.file.mimetype === 'application/pdf' || req.file.originalname.endsWith('.pdf')) {
+        const data = await pdfParse(req.file.buffer);
+        text = data.text;
+      } else {
+        text = req.file.buffer.toString('utf-8');
+      }
+      text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+      res.json({ text, filename: req.file.originalname, chars: text.length });
+    } catch (err) {
+      console.error('[parse-resume]', err.message);
+      res.status(500).json({ error: 'Failed to parse file. Please paste your resume text manually.' });
+    }
+  });
+}
+
+// ── Request Validator ─────────────────────────────────
+const validateRequest = (body) => {
+  if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) return 'messages array required';
+  if (body.messages.length > 25) return 'too many messages (max 25)';
+  for (const msg of body.messages) {
+    if (!msg.role || !msg.content) return 'each message needs role and content';
+    if (!['user', 'assistant'].includes(msg.role)) return 'invalid role';
+  }
+  return null;
+};
+
+// ── Stream Handlers ───────────────────────────────────
+const streamGroq = async (messages, system, maxTokens, emitFn, controller, onFirstToken) => {
+  const msgs = [];
+  if (system) msgs.push({ role: 'system', content: system });
+  msgs.push(...messages.slice(-12));
+
+  let tokenCount = 0;
+  let signaledFirst = false;
+
   const stream = await groq.chat.completions.create({
     model: PROVIDERS.groq.model,
-    messages: [
-      { role: "system", content: fullPrompt },
-      ...messages.slice(-8)
-    ],
+    messages: msgs,
+    max_tokens: Math.min(parseInt(maxTokens) || 1200, 8192),
+    temperature: 0.7,
     stream: true
-  });
+  }, { signal: controller.signal });
+
   for await (const chunk of stream) {
-    const content = chunk.choices[0]?.delta?.content || "";
-    if (content) socket.emit('chunk', { data: content });
+    if (controller.signal.aborted) break;
+    const text = chunk.choices[0]?.delta?.content || '';
+    if (text) {
+      if (!signaledFirst) { signaledFirst = true; onFirstToken(); }
+      tokenCount++;
+      emitFn({ type: 'content_block_delta', delta: { type: 'text_delta', text } });
+    }
   }
+  return tokenCount;
 };
 
-const streamGemini = async (fullPrompt, messages, socket) => {
-  const model = genAI.getGenerativeModel({ 
+const streamGemini = async (messages, system, maxTokens, emitFn, controller, onFirstToken) => {
+  const model = genAI.getGenerativeModel({
     model: PROVIDERS.gemini.model,
-    systemInstruction: fullPrompt
+    systemInstruction: system || '',
+    generationConfig: { maxOutputTokens: Math.min(parseInt(maxTokens) || 1200, 8192), temperature: 0.7 }
   });
+
   const history = messages.slice(0, -1).map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }]
   }));
+  const lastMessage = messages[messages.length - 1];
   const chat = model.startChat({ history });
-  const lastMsg = messages[messages.length - 1]?.content || "Hello";
-  const result = await chat.sendMessageStream(lastMsg);
+  const result = await chat.sendMessageStream(lastMessage.content, { signal: controller.signal });
+
+  let tokenCount = 0;
+  let signaledFirst = false;
+
   for await (const chunk of result.stream) {
-    const content = chunk.text();
-    if (content) socket.emit('chunk', { data: content });
-  }
-};
-
-const streamOllama = async (fullPrompt, messages, socket) => {
-  const response = await axios.post("http://localhost:11434/api/generate", {
-    model: PROVIDERS.ollama.model,
-    system: fullPrompt,
-    prompt: messages[messages.length - 1]?.content || "",
-    stream: true
-  }, { responseType: 'stream' });
-
-  return new Promise((resolve, reject) => {
-    response.data.on('data', chunk => {
-      const lines = chunk.toString().split('\n');
-      lines.forEach(line => {
-        if (!line.trim()) return;
-        try {
-          const parsed = JSON.parse(line);
-          if (parsed.response) socket.emit('chunk', { data: parsed.response });
-          if (parsed.done) resolve();
-        } catch (e) { /* partial chunk */ }
-      });
-    });
-    response.data.on('error', reject);
-    response.data.on('end', resolve);
-  });
-};
-
-// ── The Master Provider Manager ───────────────────────
-
-async function executeStreamWithFallback(socket, payload) {
-  const { messages, userId = 'anonymous' } = payload;
-  const resumeSummary = resumeSummaries.get(userId) || "No resume content provided.";
-  
-  const fullPrompt = `Resume Summary:\n${resumeSummary}\n\nObjective: You are ARIA, an interview copilot. Provide strategic, concise guidance based on the resume and context below.`;
-  
-  const providersToTry = ['groq', 'gemini', 'ollama'];
-  let currentProviderIndex = 0;
-  let success = false;
-
-  while (currentProviderIndex < providersToTry.length && !success) {
-    const pId = providersToTry[currentProviderIndex];
-    const pInfo = PROVIDERS[pId];
-
-    if (!pInfo.available && pId !== 'ollama') {
-      currentProviderIndex++;
-      continue;
-    }
-
-    try {
-      socket.emit('provider', { name: pInfo.name, id: pId });
-      
-      // Timeout guard: 10s for first token
-      const timeoutPromise = new Promise((_, rej) => 
-        setTimeout(() => rej(new Error('TIMEOUT')), 10000)
-      );
-
-      if (pId === 'groq') await streamGroq(fullPrompt, messages, socket);
-      else if (pId === 'gemini') await streamGemini(fullPrompt, messages, socket);
-      else if (pId === 'ollama') await streamOllama(fullPrompt, messages, socket);
-
-      success = true;
-      socket.emit('done');
-    } catch (err) {
-      console.error(`❌ Provider ${pId} failed:`, err.message);
-      fs.appendFileSync('error.log', `[${new Date().toISOString()}] ${pId} Fail: ${err.message}\n`);
-      
-      currentProviderIndex++;
-      if (currentProviderIndex < providersToTry.length) {
-        const nextP = PROVIDERS[providersToTry[currentProviderIndex]];
-        socket.emit('fallback', { from: pInfo.name, to: nextP.name });
-      } else {
-        socket.emit('error', { message: "All providers exhausted." });
-      }
+    if (controller.signal.aborted) break;
+    const text = chunk.text();
+    if (text) {
+      if (!signaledFirst) { signaledFirst = true; onFirstToken(); }
+      tokenCount += Math.ceil(text.length / 4);
+      emitFn({ type: 'content_block_delta', delta: { type: 'text_delta', text } });
     }
   }
-}
+  return tokenCount;
+};
 
-// ── Socket Events ─────────────────────────────────────
-
+// ── Socket.io Core ────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`Socket Connected: ${socket.id}`);
 
-  socket.on('chat_stream', (payload) => {
-    executeStreamWithFallback(socket, payload).catch(err => {
-      console.error("Internal execute error:", err);
-      socket.emit('error', { message: "Critical System Error" });
-    });
+  socket.on('chat_stream', async (payload) => {
+    const validationError = validateRequest(payload);
+    if (validationError) return socket.emit('stream_error', { error: validationError });
+
+    const { messages, system, max_tokens, provider = 'groq', userId = 'anonymous' } = payload;
+    const streamId = uuidv4();
+
+    const activeProvider = (provider === 'groq' && hasGroq) ? 'groq'
+      : (provider === 'gemini' && hasGemini) ? 'gemini'
+      : hasGroq ? 'groq' : 'gemini';
+
+    const controller = new AbortController();
+    activeStreams.set(streamId, controller);
+
+    socket.emit('stream_start', { streamId, provider: activeProvider, model: PROVIDERS[activeProvider].model });
+
+    const emitFn = (chunk) => socket.emit('stream_token', { streamId, chunk });
+
+    let fallbackTriggered = false;
+    let fallbackTimer = null;
+
+    const executeStream = async (targetProvider, isFallback = false) => {
+      try {
+        let tokensUsed = 0;
+        const onFirstToken = () => { if (fallbackTimer) clearTimeout(fallbackTimer); };
+
+        if (!isFallback) {
+          fallbackTimer = setTimeout(() => {
+            console.warn(`[${targetProvider}] TTFT >5s — triggering fallback`);
+            fallbackTriggered = true;
+            controller.abort();
+            const nextProvider = targetProvider === 'groq' ? 'gemini' : 'groq';
+            const nextAvailable = nextProvider === 'groq' ? hasGroq : hasGemini;
+            if (nextAvailable) {
+              socket.emit('stream_fallback', { streamId, from: targetProvider, to: nextProvider, reason: 'ttft_timeout' });
+              executeStream(nextProvider, true);
+            } else {
+              socket.emit('stream_error', { streamId, error: 'Provider timeout and no fallback available.' });
+            }
+          }, 5000);
+        }
+
+        if (targetProvider === 'groq') {
+          tokensUsed = await streamGroq(messages, system, max_tokens, emitFn, controller, onFirstToken);
+        } else {
+          tokensUsed = await streamGemini(messages, system, max_tokens, emitFn, controller, onFirstToken);
+        }
+
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        if (!controller.signal.aborted) {
+          socket.emit('stream_end', { streamId });
+          await trackUsage(userId, tokensUsed, 0);
+        }
+      } catch (err) {
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        if (err.name === 'AbortError') { console.log(`[socket] Stream ${streamId} aborted.`); return; }
+        console.error(`❌ [${targetProvider}]`, err.message);
+        if (!isFallback && !fallbackTriggered) {
+          const nextProvider = targetProvider === 'groq' ? 'gemini' : 'groq';
+          if (nextProvider === 'groq' ? hasGroq : hasGemini) {
+            socket.emit('stream_fallback', { streamId, from: targetProvider, to: nextProvider, reason: 'error' });
+            return executeStream(nextProvider, true);
+          }
+        }
+        socket.emit('stream_error', { streamId, error: 'AI provider failed. Check API keys/balance.' });
+      } finally {
+        if (activeStreams.get(streamId) === controller) activeStreams.delete(streamId);
+      }
+    };
+
+    executeStream(activeProvider);
   });
 
-  socket.on('cancel_stream', () => {
-    // Handling barge-in: currently we just let the next event overtake
-    console.log("Client cancelled stream/asked new question.");
+  socket.on('cancel_stream', ({ streamId }) => {
+    if (streamId && activeStreams.has(streamId)) {
+      console.log(`[barge-in] Stopping stream: ${streamId}`);
+      activeStreams.get(streamId).abort();
+      activeStreams.delete(streamId);
+    }
   });
 
-  socket.on('disconnect', () => console.log("Socket Disconnected"));
+  socket.on('disconnect', () => console.log(`Socket Disconnected: ${socket.id}`));
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n╔══════════════════════════════════════════╗`);
-  console.log(`║      ARIA v4.0 — ELITE STABILIZATION     ║`);
-  console.log(`╚══════════════════════════════════════════╝`);
-  console.log(`🚀 Port: ${PORT}`);
-  console.log(`🛠 Providers: Groq -> Gemini -> Ollama`);
-  console.log(`──────────────────────────────────────────\n`);
+  console.log('\n╔══════════════════════════════════════════╗');
+  console.log('║     ARIA v4.2 — Production Engine Up     ║');
+  console.log('╚══════════════════════════════════════════╝');
+  console.log(`🚀 Port:     ${PORT}`);
+  console.log(`⚡ Groq:     ${hasGroq ? 'Llama-3.3-70b ✓' : 'NOT SET'}`);
+  console.log(`✨ Gemini:   ${hasGemini ? 'Gemini-2.0-Flash ✓' : 'NOT SET'}`);
+  console.log('🔗 Handshake: Polling → WebSocket\n');
 });
+
+process.on('uncaughtException', (err) => console.error('CRITICAL:', err));
+process.on('unhandledRejection', (reason) => console.error('CRITICAL:', reason));

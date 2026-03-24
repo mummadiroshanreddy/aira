@@ -1,3 +1,7 @@
+// ════════════════════════════════
+// FILE: src/components/Setup/SetupScreen.jsx
+// ════════════════════════════════
+
 import React, { useState, useEffect, useRef } from 'react';
 
 const SetupScreen = ({ onComplete }) => {
@@ -6,75 +10,57 @@ const SetupScreen = ({ onComplete }) => {
   const [resumeFileName, setResumeFileName] = useState('');
   const [resumeUploading, setResumeUploading] = useState(false);
   const fileInputRef = useRef(null);
-
-  // Read userId directly from localStorage — we render OUTSIDE AppContext.Provider
-  const userId = localStorage.getItem('aria_user_id') || 'anonymous';
-
   const [data, setData] = useState({
-    name: '',
-    role: '',
-    company: '',
-    level: 'Mid-Level',
-    type: 'Behavioral',
-    style: 'Strategic',
-    resume: '',
-    jd: '',
-    userId
+    name: '', role: '', company: '', level: 'Mid-Level',
+    type: 'Behavioral', style: 'Strategic', resume: '', jd: '',
+    userId: localStorage.getItem('aria_user_id') || 'anonymous'
   });
 
   useEffect(() => {
-    const saved = localStorage.getItem('aria_setup');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      setReturningUser(true);
-      setData(prev => ({ ...prev, ...parsed, userId }));
+    const cached = localStorage.getItem('aria_setup');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        setReturningUser(true);
+        setData(prev => ({ ...prev, ...parsed }));
+      } catch (_) {}
     }
   }, []);
 
-  const handleChange = (field, val) => {
-    setData(prev => ({ ...prev, [field]: val }));
-  };
+  const handleChange = (field, val) => setData(prev => ({ ...prev, [field]: val }));
 
   const handleResumeFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setResumeUploading(true);
     setResumeFileName(file.name);
 
     try {
       const formData = new FormData();
       formData.append('resume', file);
-      formData.append('userId', data.userId);
-
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      const apiUrl = isLocal 
-        ? 'http://localhost:3001/api' 
-        : `${window.location.protocol}//${window.location.hostname}:3001/api`;
+      const apiUrl = process.env.REACT_APP_SERVER_URL
+        ? `${process.env.REACT_APP_SERVER_URL}/api`
+        : isLocal
+          ? 'http://localhost:3001/api'
+          : `${window.location.protocol}//${window.location.hostname}:3001/api`;
 
       const res = await fetch(`${apiUrl}/parse-resume`, { method: 'POST', body: formData });
-
       if (res.ok) {
         const result = await res.json();
-        // We store the summary returned by the backend
-        handleChange('resume', result.summary || result.text);
+        handleChange('resume', result.text || result.summary || '');
         setResumeUploading(false);
         return;
       }
-    } catch (_) {
-      console.warn("Upload failed, falling back to local reading if possible.");
-    }
+    } catch (_) {}
 
-    // Basic.txt fallback
+    // Client-side fallback for .txt
     if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
       const reader = new FileReader();
-      reader.onload = (evt) => {
-        handleChange('resume', evt.target.result || '');
-        setResumeUploading(false);
-      };
+      reader.onload = (evt) => { handleChange('resume', evt.target.result || ''); setResumeUploading(false); };
       reader.readAsText(file);
     } else {
-      handleChange('resume', `[File: ${file.name} uploaded - parsing handled by server]`);
+      handleChange('resume', `[PDF: ${file.name} uploaded — server parsing unavailable, paste key highlights below]`);
       setResumeUploading(false);
     }
   };
@@ -90,24 +76,15 @@ const SetupScreen = ({ onComplete }) => {
 
   const renderPillGroup = (label, currentVal, options, fieldKey) => (
     <div style={{ marginBottom: 24 }}>
-      <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>{label}</label>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+      <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>{label}</label>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {options.map(opt => (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => handleChange(fieldKey, opt)}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 20,
-              fontSize: 14,
+          <button key={opt} type="button" onClick={() => handleChange(fieldKey, opt)}
+            style={{ padding: '8px 16px', borderRadius: 20, fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
               border: `1px solid ${currentVal === opt ? 'var(--cyan)' : 'var(--border-dim)'}`,
-              background: currentVal === opt ? 'rgba(0, 240, 255, 0.1)' : 'transparent',
-              color: currentVal === opt ? 'var(--cyan)' : 'var(--text-primary)',
-              cursor: 'pointer',
-              transition: 'all 0.2s'
-            }}
-          >
+              background: currentVal === opt ? 'rgba(0,240,255,0.1)' : 'transparent',
+              color: currentVal === opt ? 'var(--cyan)' : 'var(--text-primary)'
+            }}>
             {opt}
           </button>
         ))}
@@ -117,10 +94,11 @@ const SetupScreen = ({ onComplete }) => {
 
   if (returningUser) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-base)', padding: 24 }}>
-        <div className="aria-card" style={{ maxWidth: 500, width: '100%', textAlign: 'center' }}>
-          <h1 style={{ fontSize: 24, marginBottom: 12 }}>Welcome back, {data.name}</h1>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 32 }}>Targeting {data.level} {data.role}</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: 24 }}>
+        <div className="aria-card" style={{ maxWidth: 480, width: '100%', textAlign: 'center', padding: 48 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚡</div>
+          <h1 style={{ fontSize: 24, marginBottom: 8 }}>Welcome back, {data.name}</h1>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 32 }}>Targeting {data.level} {data.role}{data.company ? ` at ${data.company}` : ''}</p>
           <div style={{ display: 'flex', gap: 16 }}>
             <button className="btn-ghost" style={{ flex: 1 }} onClick={() => { setReturningUser(false); setStep(1); }}>Edit Profile</button>
             <button className="btn-primary" style={{ flex: 2 }} onClick={() => onComplete(data)}>Launch Copilot</button>
@@ -131,49 +109,80 @@ const SetupScreen = ({ onComplete }) => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', backgroundColor: 'var(--bg-base)', padding: 48 }}>
-      <div style={{ maxWidth: 600, margin: '0 auto', width: '100%' }}>
-        <div style={{ marginBottom: 48 }}>
-          <h2 style={{ fontSize: 32, marginBottom: 8 }}>{step === 1 ? 'Initialize Profile' : 'Context Mapping'}</h2>
-          <p style={{ color: 'var(--text-secondary)' }}>Step {step} of 2</p>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          {step === 1 && (
-            <div>
-              <div style={{ marginBottom: 24 }}>
-                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>CANDIDATE NAME *</label>
-                <input className="aria-input" value={data.name} onChange={e=>handleChange('name', e.target.value)} required />
-              </div>
-              <div style={{ marginBottom: 24 }}>
-                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>TARGET ROLE *</label>
-                <input className="aria-input" value={data.role} onChange={e=>handleChange('role', e.target.value)} required />
-              </div>
-              {renderPillGroup("SENIORITY LEVEL", data.level, ["Entry-Level", "Mid-Level", "Senior", "Director+"], "level")}
-              <button type="button" className="btn-primary" style={{ width: '100%', padding: 16 }} onClick={() => setStep(2)} disabled={!isStep1Valid}>Next Step</button>
+    <div style={{ minHeight: '100vh', display: 'flex', background: 'var(--bg-base)' }}>
+      <div style={{ flex: 1, padding: '64px 48px', overflowY: 'auto' }}>
+        <div style={{ maxWidth: 560, margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 48 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono' }}>ARIA SETUP — STEP {step} OF 2</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ width: 40, height: 4, background: step >= 1 ? 'var(--cyan)' : 'var(--border-dim)', borderRadius: 2, transition: 'background 0.3s' }} />
+              <div style={{ width: 40, height: 4, background: step >= 2 ? 'var(--cyan)' : 'var(--border-dim)', borderRadius: 2, transition: 'background 0.3s' }} />
             </div>
-          )}
+          </div>
 
-          {step === 2 && (
-            <div>
-              <div style={{ marginBottom: 24 }}>
-                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>UPLOAD RESUME (.PDF, .DOCX, .TXT)</label>
-                <input ref={fileInputRef} type="file" accept=".pdf,.docx,.txt" onChange={handleResumeFile} style={{ display: 'none' }} />
-                <div onClick={() => fileInputRef.current.click()} style={{ border: '1px dashed var(--border-dim)', padding: 20, textAlign: 'center', cursor: 'pointer', borderRadius: 8 }}>
-                  {resumeUploading ? 'Summarizing...' : resumeFileName || 'Click to upload resume'}
+          <form onSubmit={handleSubmit}>
+            {step === 1 && (
+              <div>
+                <h2 style={{ fontSize: 32, marginBottom: 8 }}>Initialize Profile</h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 40 }}>Configure the engine for your specific target.</p>
+
+                <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>CANDIDATE NAME *</label>
+                    <input className="aria-input" value={data.name} onChange={e => handleChange('name', e.target.value)} placeholder="John Doe" required />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>TARGET COMPANY</label>
+                    <input className="aria-input" value={data.company} onChange={e => handleChange('company', e.target.value)} placeholder="Google, Stripe..." />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 32 }}>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>TARGET ROLE *</label>
+                  <input className="aria-input" value={data.role} onChange={e => handleChange('role', e.target.value)} placeholder="Senior Product Manager" required />
+                </div>
+
+                {renderPillGroup("SENIORITY LEVEL", data.level, ["Entry-Level", "Mid-Level", "Senior", "Staff/Principal", "Director+"], "level")}
+                {renderPillGroup("INTERVIEW TYPE", data.type, ["Behavioral", "Technical", "Case Study", "System Design"], "type")}
+                {renderPillGroup("ARIA STYLE", data.style, ["Strategic (STAR)", "Direct & Concise", "Visionary", "Data-Driven"], "style")}
+
+                <button type="button" className="btn-primary" style={{ width: '100%', marginTop: 24, padding: 16 }} onClick={() => setStep(2)} disabled={!isStep1Valid}>
+                  Continue →
+                </button>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div>
+                <h2 style={{ fontSize: 32, marginBottom: 8 }}>Context Mapping</h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 40 }}>Seed the engine with your DNA and the objective.</p>
+
+                <div style={{ marginBottom: 24 }}>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>RESUME / BIO <span style={{ color: 'var(--text-dim)' }}>(OPTIONAL)</span></label>
+                  <input ref={fileInputRef} type="file" accept=".txt,.pdf,.doc,.docx" onChange={handleResumeFile} style={{ display: 'none' }} />
+                  <div onClick={() => fileInputRef.current?.click()} style={{ border: '1px dashed var(--border-dim)', borderRadius: 8, padding: '12px 16px', marginBottom: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, background: resumeFileName ? 'rgba(0,240,255,0.05)' : 'transparent', color: resumeFileName ? 'var(--cyan)' : 'var(--text-dim)', fontSize: 13, fontFamily: 'JetBrains Mono', transition: 'all 0.2s' }}>
+                    <span>{resumeUploading ? '⏳' : resumeFileName ? '📄' : '📎'}</span>
+                    <span>{resumeUploading ? 'Parsing file...' : resumeFileName ? `Uploaded: ${resumeFileName}` : 'Upload resume (.txt, .pdf, .docx)'}</span>
+                    {resumeFileName && (
+                      <span onClick={e => { e.stopPropagation(); setResumeFileName(''); handleChange('resume', ''); }} style={{ marginLeft: 'auto', color: 'var(--red)', cursor: 'pointer' }}>✕</span>
+                    )}
+                  </div>
+                  <textarea className="aria-input" value={data.resume} onChange={e => handleChange('resume', e.target.value)} placeholder="Or paste your resume highlights here..." rows={5} style={{ resize: 'vertical' }} />
+                </div>
+
+                <div style={{ marginBottom: 40 }}>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>JOB DESCRIPTION <span style={{ color: 'var(--text-dim)' }}>(OPTIONAL)</span></label>
+                  <textarea className="aria-input" value={data.jd} onChange={e => handleChange('jd', e.target.value)} placeholder="Paste the JD so ARIA maps answers to their exact needs..." rows={6} style={{ resize: 'vertical' }} />
+                </div>
+
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <button type="button" className="btn-ghost" style={{ flex: 1, padding: 16 }} onClick={() => setStep(1)}>← Back</button>
+                  <button type="submit" className="btn-primary" style={{ flex: 2, padding: 16 }}>BOOT ARIA ENGINE</button>
                 </div>
               </div>
-              <div style={{ marginBottom: 32 }}>
-                <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>TARGET JOB DESCRIPTION (OPTIONAL)</label>
-                <textarea className="aria-input" value={data.jd} onChange={e=>handleChange('jd', e.target.value)} rows={6} />
-              </div>
-              <div style={{ display: 'flex', gap: 16 }}>
-                <button type="button" className="btn-ghost" style={{ flex: 1 }} onClick={() => setStep(1)}>Back</button>
-                <button type="submit" className="btn-primary" style={{ flex: 2 }}>Launch ARIA</button>
-              </div>
-            </div>
-          )}
-        </form>
+            )}
+          </form>
+        </div>
       </div>
     </div>
   );

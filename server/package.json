@@ -1,7 +1,7 @@
 {
   "name": "aria-proxy-server",
-  "version": "1.0.0",
-  "description": "Secure proxy server for ARIA Copilot",
+  "version": "4.2.0",
+  "description": "ARIA v4.2 — Production AI Copilot Backend",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -10,18 +10,16 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "axios": "^1.13.6",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "groq-sdk": "^0.7.0",
     "helmet": "^7.1.0",
-    "mammoth": "^1.12.0",
     "multer": "^1.4.5-lts.1",
     "pdf-parse": "^1.1.1",
     "socket.io": "^4.8.3",
-    "uuid": "^13.0.0"
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
