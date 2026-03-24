@@ -34,13 +34,16 @@ const warmupProviders = async () => {
     try {
       // Single-token warmup keeps the connection alive
       const warm = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: PROVIDERS.groq.model,
         messages: [{ role: 'user', content: 'hi' }],
         max_tokens: 1,
         stream: false
       });
       console.log('⚡ Groq warmed up ✓');
-    } catch (e) { console.warn('Groq warmup failed (non-fatal):', e.message); }
+    } catch (e) { 
+      console.warn('Groq warmup failed (non-fatal):', e.message);
+      if (e.message.includes('API key')) console.error('CRITICAL: Groq API Key invalid!');
+    }
   }
   if (genAI) {
     try {
@@ -94,8 +97,8 @@ app.post('/api/billing/webhook', stripeWebhookPlaceholder);
 
 // ── Provider config ───────────────────────────────────
 const PROVIDERS = {
-  groq:   { name: 'Groq',   model: 'llama-3.3-70b-versatile', available: hasGroq,   speed: 'Fastest', badge: '⚡' },
-  gemini: { name: 'Gemini', model: 'gemini-2.0-flash',        available: hasGemini, speed: 'Fast',    badge: '✨' }
+  groq:   { name: 'Groq',   model: 'llama-3.3-70b-specdec', available: hasGroq,   speed: 'Fastest', badge: '⚡' },
+  gemini: { name: 'Gemini', model: 'gemini-2.0-flash',       available: hasGemini, speed: 'Fast',    badge: '✨' }
 };
 
 app.get('/api/providers', (req, res) => {
