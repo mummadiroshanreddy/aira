@@ -3,7 +3,7 @@
 // ════════════════════════════════
 
 import React, { useState, useContext } from 'react';
-import { streamClaude } from '../../api/claude';
+import { streamClaude } from '../../api/aiProvider';
 import { AppContext } from '../../App';
 import { toast } from '../UI/Toast';
 

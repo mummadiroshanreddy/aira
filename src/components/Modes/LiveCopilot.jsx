@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useContext, useCallback } from 'react';
-import { streamClaude, cancelActiveStream, callClaude } from '../../api/claude';
+import { streamClaude, cancelActiveStream, callClaude } from '../../api/aiProvider';
 import { socket } from '../../api/socket';
 import { useSpeech } from '../../hooks/useSpeech';
 import { useTTS } from '../../hooks/useTTS';
@@ -64,16 +64,16 @@ const LiveCopilot = () => {
   useEffect(() => {
     startListening();
     return () => stopListening();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // intentional empty deps — run once on mount
+
 
   // Handle external submits from InputBar (Ctrl+Enter / send button)
   useEffect(() => {
     const handleAriaSubmit = (e) => { if (e.detail) submitQuestion(e.detail); };
     window.addEventListener('aria_submit', handleAriaSubmit);
     return () => window.removeEventListener('aria_submit', handleAriaSubmit);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history]);
+  }, [history]); // re-register when history changes so submitQuestion has fresh closure
+
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -98,8 +98,8 @@ const LiveCopilot = () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // socket is a singleton — no deps needed
+
 
   const calculateSimilarity = (str1, str2) => {
     const words1 = str1.toLowerCase().replace(/[^\w\s]/g, '').split(' ');

@@ -3,7 +3,7 @@
 // ════════════════════════════════
 
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { streamClaude } from '../../api/claude';
+import { streamClaude } from '../../api/aiProvider';
 import { useCountdown } from '../../hooks/useTimer';
 import ScoreRing from '../UI/ScoreRing';
 import { AppContext } from '../../App';

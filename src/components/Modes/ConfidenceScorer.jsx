@@ -3,7 +3,7 @@
 // ════════════════════════════════
 
 import React, { useState, useContext, useRef } from 'react';
-import { streamClaude } from '../../api/claude';
+import { streamClaude } from '../../api/aiProvider';
 import ScoreRing from '../UI/ScoreRing';
 import { AppContext } from '../../App';
 import { toast } from '../UI/Toast';

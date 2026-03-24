@@ -3,6 +3,7 @@
 // ════════════════════════════════
 
 import React, { useState, useEffect, useRef } from 'react';
+import { callClaude } from '../../api/aiProvider';
 
 const SetupScreen = ({ onComplete }) => {
   const [step, setStep] = useState(1);
@@ -12,7 +13,7 @@ const SetupScreen = ({ onComplete }) => {
   const fileInputRef = useRef(null);
   const [data, setData] = useState({
     name: '', role: '', company: '', level: 'Mid-Level',
-    type: 'Behavioral', style: 'Strategic', resume: '', jd: '',
+    type: 'Behavioral', style: 'Strategic', resume: '', resumeSummary: '', jd: '',
     userId: localStorage.getItem('aria_user_id') || 'anonymous'
   });
 
@@ -29,11 +30,26 @@ const SetupScreen = ({ onComplete }) => {
 
   const handleChange = (field, val) => setData(prev => ({ ...prev, [field]: val }));
 
+  const generateSummary = async (text) => {
+    if (!text || text.length < 50) return "";
+    try {
+      const prompt = `Please provide a 3-sentence summary of this candidate's background, top skills, and key achievements based on this resume text. Formatting: bullet points. \n\n resume text: ${text.slice(0, 4000)}`;
+      const system = "You are an expert technical recruiter summarizing resumes for an interview copilot.";
+      const summary = await callClaude(system, prompt);
+      return summary;
+    } catch (e) {
+      console.warn("Summary generation failed:", e);
+      return text.slice(0, 500) + "...";
+    }
+  };
+
   const handleResumeFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setResumeUploading(true);
     setResumeFileName(file.name);
+
+    let text = "";
 
     try {
       const formData = new FormData();
@@ -48,21 +64,28 @@ const SetupScreen = ({ onComplete }) => {
       const res = await fetch(`${apiUrl}/parse-resume`, { method: 'POST', body: formData });
       if (res.ok) {
         const result = await res.json();
-        handleChange('resume', result.text || result.summary || '');
-        setResumeUploading(false);
-        return;
+        text = result.text || "";
       }
     } catch (_) {}
 
-    // Client-side fallback for .txt
-    if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
-      const reader = new FileReader();
-      reader.onload = (evt) => { handleChange('resume', evt.target.result || ''); setResumeUploading(false); };
-      reader.readAsText(file);
-    } else {
-      handleChange('resume', `[PDF: ${file.name} uploaded — server parsing unavailable, paste key highlights below]`);
-      setResumeUploading(false);
+    // Client-side fallback for .txt if server fails or is txt
+    if (!text && (file.type === 'text/plain' || file.name.endsWith('.txt'))) {
+      text = await new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result || '');
+        reader.readAsText(file);
+      });
     }
+
+    if (text) {
+      handleChange('resume', text);
+      const summary = await generateSummary(text);
+      handleChange('resumeSummary', summary);
+    } else if (!text && file.name.match(/\.(pdf|docx)$/i)) {
+      handleChange('resume', `[${file.name} uploaded — please paste highlights below]`);
+    }
+    
+    setResumeUploading(false);
   };
 
   const isStep1Valid = data.name.trim() !== '' && data.role.trim() !== '';
@@ -162,9 +185,10 @@ const SetupScreen = ({ onComplete }) => {
                   <input ref={fileInputRef} type="file" accept=".txt,.pdf,.doc,.docx" onChange={handleResumeFile} style={{ display: 'none' }} />
                   <div onClick={() => fileInputRef.current?.click()} style={{ border: '1px dashed var(--border-dim)', borderRadius: 8, padding: '12px 16px', marginBottom: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, background: resumeFileName ? 'rgba(0,240,255,0.05)' : 'transparent', color: resumeFileName ? 'var(--cyan)' : 'var(--text-dim)', fontSize: 13, fontFamily: 'JetBrains Mono', transition: 'all 0.2s' }}>
                     <span>{resumeUploading ? '⏳' : resumeFileName ? '📄' : '📎'}</span>
-                    <span>{resumeUploading ? 'Parsing file...' : resumeFileName ? `Uploaded: ${resumeFileName}` : 'Upload resume (.txt, .pdf, .docx)'}</span>
+                    <span style={{ flex: 1 }}>{resumeUploading ? 'Parsing & Summarizing DNA...' : resumeFileName ? `Source: ${resumeFileName}` : 'Upload resume (.txt, .pdf, .docx)'}</span>
+                    {data.resumeSummary && !resumeUploading && <span style={{ fontSize: 9, background: 'rgba(74,222,128,0.1)', color: 'var(--green)', padding: '2px 8px', borderRadius: 10 }}>Summary Generated ✨</span>}
                     {resumeFileName && (
-                      <span onClick={e => { e.stopPropagation(); setResumeFileName(''); handleChange('resume', ''); }} style={{ marginLeft: 'auto', color: 'var(--red)', cursor: 'pointer' }}>✕</span>
+                      <span onClick={e => { e.stopPropagation(); setResumeFileName(''); handleChange('resume', ''); handleChange('resumeSummary', ''); }} style={{ marginLeft: 10, color: 'var(--red)', cursor: 'pointer' }}>✕</span>
                     )}
                   </div>
                   <textarea className="aria-input" value={data.resume} onChange={e => handleChange('resume', e.target.value)} placeholder="Or paste your resume highlights here..." rows={5} style={{ resize: 'vertical' }} />

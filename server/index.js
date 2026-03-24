@@ -110,20 +110,22 @@ app.get('/api/providers', (req, res) => {
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // ── Resume File Parser ────────────────────────────────
-let multer, pdfParse;
+let multer, pdfParse, mammoth;
 try {
   multer = require('multer');
   pdfParse = require('pdf-parse');
+  mammoth = require('mammoth');
 } catch (_) {
-  console.warn('⚠️  multer/pdf-parse not installed. Run: npm install multer pdf-parse');
+  console.warn('⚠️  Dependencies not installed. Run: npm install multer pdf-parse mammoth');
 }
 
-if (multer && pdfParse) {
+if (multer && pdfParse && mammoth) {
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 },
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
     fileFilter: (req, file, cb) => {
-      if (['application/pdf', 'text/plain'].includes(file.mimetype) || file.originalname.match(/\.(txt|pdf|docx?)$/i)) {
+      const allowed = ['application/pdf', 'text/plain', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      if (allowed.includes(file.mimetype) || file.originalname.match(/\.(txt|pdf|docx)$/i)) {
         cb(null, true);
       } else {
         cb(new Error('Only PDF/TXT/DOCX files are supported'), false);
@@ -135,17 +137,33 @@ if (multer && pdfParse) {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     try {
       let text = '';
-      if (req.file.mimetype === 'application/pdf' || req.file.originalname.endsWith('.pdf')) {
+      const ext = req.file.originalname.split('.').pop().toLowerCase();
+      
+      if (ext === 'pdf' || req.file.mimetype === 'application/pdf') {
         const data = await pdfParse(req.file.buffer);
         text = data.text;
+      } else if (ext === 'docx' || req.file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+        text = result.value;
       } else {
         text = req.file.buffer.toString('utf-8');
       }
-      text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
-      res.json({ text, filename: req.file.originalname, chars: text.length });
+
+      // Cleanup text: remove excessive whitespace, null bytes, etc.
+      text = text.replace(/\n{3,}/g, '\n\n')
+                 .replace(/[ \t]{2,}/g, ' ')
+                 .replace(/\x00/g, '') 
+                 .trim();
+
+      res.json({ 
+        text, 
+        filename: req.file.originalname, 
+        chars: text.length,
+        summary: text.slice(0, 500) + (text.length > 500 ? '...' : '')
+      });
     } catch (err) {
       console.error('[parse-resume]', err.message);
-      res.status(500).json({ error: 'Failed to parse file. Please paste your resume text manually.' });
+      res.status(500).json({ error: 'Failed to parse file. Please use TXT or paste manually.' });
     }
   });
 }
