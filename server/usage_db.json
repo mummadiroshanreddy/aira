@@ -6,6 +6,13 @@
       "totalSessionMs": 0,
       "tier": "free",
       "stripeCustomerId": null
+    },
+    "42055c0a-baa4-464b-bab3-44710ea5363d": {
+      "requests": 1,
+      "tokensUsed": 192,
+      "totalSessionMs": 0,
+      "tier": "free",
+      "stripeCustomerId": null
     }
   }
 }

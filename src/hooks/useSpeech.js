@@ -78,14 +78,23 @@ export const useSpeech = (options = {}) => {
     };
   }, []);
 
+  const isFiredRef = useRef(false);
+
   // Silence detector — fires onSilence after no new words for silenceTimeoutMs
   useEffect(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
     const fullText = (transcript + ' ' + interimTranscript).trim();
-    if (!fullText) return;
+    if (!fullText) {
+      isFiredRef.current = false; // reset guard when transcript is empty
+      return;
+    }
+    if (isFiredRef.current) return; // already fired for this utterance
 
     silenceTimerRef.current = setTimeout(() => {
+      isFiredRef.current = true;
+      // Clear state immediately so the timer doesn't re-trigger
+      setTranscript('');
       setInterimTranscript('');
       if (fullText.length > 3 && onSilence) {
         onSilence(fullText);

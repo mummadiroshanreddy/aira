@@ -18,21 +18,25 @@ const LiveCopilot = () => {
   const [predictions, setPredictions] = useState([]);
   const [isPredicting, setIsPredicting] = useState(false);
   const [activeProviderDisplay, setActiveProviderDisplay] = useState('⚡ Groq');
+  const [selectedProvider, setSelectedProvider] = useState('groq'); // manual switcher
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [transport, setTransport] = useState(socket.io?.engine?.transport?.name || 'unknown');
 
-  // Ref-based regen guard to prevent infinite loops
   const regenCountRef = useRef(0);
   const MAX_REGEN = 2;
   const isGeneratingRef = useRef(false);
   const messagesEndRef = useRef(null);
   const requestStartTimeRef = useRef(0);
+  // submitRef: lets handleSilenceFinal call the LATEST submitQuestion without stale closure
+  const submitRef = useRef(null);
 
   const { speakChunk, flush, cancel: cancelTTS, isSpeaking } = useTTS();
 
+  // Use a ref so useSpeech's onSilence always calls the latest submitQuestion
   const handleSilenceFinal = useCallback((stableText) => {
-    if (stableText.trim().length > 3) submitQuestion(stableText.trim());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (stableText.trim().length > 3 && submitRef.current) {
+      submitRef.current(stableText.trim());
+    }
   }, []);
 
   const {
@@ -139,8 +143,12 @@ Return ONLY a valid JSON array: [ { "question": "...", "answer": "⚡ HOOK\\n...
   };
 
   const submitQuestion = async (text, isRegen = false) => {
+    // Always keep submitRef current so handleSilenceFinal has latest version
+    submitRef.current = submitQuestion;
+
     if (!text || typeof text !== 'string' || !text.trim()) return;
     if (isGeneratingRef.current && !isRegen) return;
+
 
     if (isRegen) {
       regenCountRef.current += 1;
@@ -281,6 +289,14 @@ Style: ${setupData?.type || 'Behavioral'}
           setError(`Stream error: ${err.message}`);
           setIsGenerating(false);
           isGeneratingRef.current = false;
+          // Remove the empty assistant placeholder so next question works
+          setHistory(prev => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === 'assistant' && !last.content) {
+              return prev.slice(0, -1);
+            }
+            return prev;
+          });
         },
         (name) => setActiveProviderDisplay(name),
         (from, to) => toast.show(`Fallback: ${from} → ${to}`, 'info')
@@ -361,21 +377,33 @@ Style: ${setupData?.type || 'Behavioral'}
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-raised)', padding: '12px 20px', borderRadius: 12, border: '1px solid var(--border-dim)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ fontSize: 13, color: 'var(--cyan)', fontFamily: 'JetBrains Mono' }}>{activeProviderDisplay}</div>
-          {isListening && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulseRed 1.5s infinite' }} />}
-          <div style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, background: isConnected ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)', border: `1px solid ${isConnected ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}`, color: isConnected ? '#4ade80' : '#f87171', fontFamily: 'JetBrains Mono' }}>
-            {isConnected ? `WS:${transport.toUpperCase()}` : 'RECONNECTING'}
+      <div style={{ background: 'var(--bg-raised)', padding: '12px 20px', borderRadius: 12, border: '1px solid var(--border-dim)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          {/* Left: status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 13, color: 'var(--cyan)', fontFamily: 'JetBrains Mono' }}>{activeProviderDisplay}</div>
+            {isListening && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', animation: 'pulseRed 1.5s infinite' }} />}
+            <div style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, background: isConnected ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)', border: `1px solid ${isConnected ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}`, color: isConnected ? '#4ade80' : '#f87171', fontFamily: 'JetBrains Mono' }}>
+              {isConnected ? `WS:${transport.toUpperCase()}` : 'RECONNECTING'}
+            </div>
+            {ttft > 0 && <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'JetBrains Mono' }}>TTFT: {ttft}ms</div>}
           </div>
-          {ttft > 0 && <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'JetBrains Mono' }}>TTFT: {ttft}ms</div>}
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={toggleMic} className="btn-ghost" style={{ fontSize: 12, border: `1px solid ${isListening ? 'var(--red)' : 'var(--border-dim)'}`, color: isListening ? 'var(--red)' : 'var(--text-dim)', padding: '6px 14px' }}>
-            {isListening ? '🎙️ Mic ON' : '🔇 Mic OFF'}
-          </button>
-          <button onClick={() => setStealthMode(true)} className="btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }}>🕶️ Stealth</button>
-          {history.length > 0 && <button onClick={clearSession} className="btn-ghost" style={{ fontSize: 12, color: 'var(--red)' }}>Purge Memory</button>}
+          {/* Right: controls */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Provider switcher */}
+            {[{ id: 'groq', label: '⚡ Groq' }, { id: 'gemini', label: '✨ Gemini' }].map(p => (
+              <button key={p.id} onClick={() => { setSelectedProvider(p.id); setActiveProviderDisplay(p.label); toast.show(`Switched to ${p.label}`, 'info'); }}
+                className="btn-ghost"
+                style={{ fontSize: 11, padding: '4px 10px', borderRadius: 12, border: `1px solid ${selectedProvider === p.id ? 'var(--cyan)' : 'var(--border-dim)'}`, color: selectedProvider === p.id ? 'var(--cyan)' : 'var(--text-dim)', background: selectedProvider === p.id ? 'rgba(0,240,255,0.08)' : 'transparent' }}>
+                {p.label}
+              </button>
+            ))}
+            <button onClick={toggleMic} className="btn-ghost" style={{ fontSize: 12, border: `1px solid ${isListening ? 'var(--red)' : 'var(--border-dim)'}`, color: isListening ? 'var(--red)' : 'var(--text-dim)', padding: '6px 14px' }}>
+              {isListening ? '🎙️ Mic ON' : '🔇 Mic OFF'}
+            </button>
+            <button onClick={() => setStealthMode(true)} className="btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }}>🕶️ Stealth</button>
+            {history.length > 0 && <button onClick={clearSession} className="btn-ghost" style={{ fontSize: 12, color: 'var(--red)' }}>Purge Memory</button>}
+          </div>
         </div>
       </div>
 
