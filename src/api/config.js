@@ -1,44 +1,27 @@
 // ════════════════════════════════
-// FIXED FILE: src/api/config.js
-// BUGS FIXED: BUG-001
+// FILE: src/api/config.js (v4.4 — no spurious warnings)
 // ════════════════════════════════
 
-const required = [
-  'REACT_APP_API_URL',
-  'REACT_APP_MODEL', 
-  'REACT_APP_MAX_TOKENS'
-];
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-required.forEach(req => {
-  if (!process.env[req]) {
-    if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_ENV === 'production') {
-      throw new Error(`CRITICAL: Missing environment variable ${req}`);
-    } else {
-      console.warn(`WARNING: Missing environment variable ${req}`);
-    }
-  }
-});
-
-const isPhpProxy = process.env.REACT_APP_API_URL?.endsWith('.php');
-
-const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+const apiUrl = process.env.REACT_APP_SERVER_URL
+  ? `${process.env.REACT_APP_SERVER_URL}/api`
+  : isLocal
+    ? 'http://localhost:3001/api'
+    : `${window.location.protocol}//${window.location.hostname}:3001/api`;
 
 export const config = Object.freeze({
   env: process.env.REACT_APP_ENV || 'development',
-  apiUrl: apiUrl,
+  apiUrl,
   appName: process.env.REACT_APP_APP_NAME || 'ARIA Copilot',
-  version: process.env.REACT_APP_VERSION || '1.0.0',
-  model: process.env.REACT_APP_MODEL || 'gemini-2.0-flash',
+  version: process.env.REACT_APP_VERSION || '4.4.0',
+  model: process.env.REACT_APP_MODEL || 'llama-3.3-70b-versatile',
   maxTokens: parseInt(process.env.REACT_APP_MAX_TOKENS) || 1200,
-  rateLimit: parseInt(process.env.REACT_APP_RATE_LIMIT) || 100,
-  sessionTimeout: parseInt(process.env.REACT_APP_SESSION_TIMEOUT) || 7200000,
-  isDev: process.env.REACT_APP_ENV === 'development',
-  isProd: process.env.REACT_APP_ENV === 'production',
-  chatEndpoint: isPhpProxy ? apiUrl : `${apiUrl}/chat`,
-  streamEndpoint: isPhpProxy ? apiUrl : `${apiUrl}/chat/stream`,
-  healthEndpoint: isPhpProxy ? apiUrl : `${apiUrl}/health`,
+  isDev: process.env.NODE_ENV === 'development',
+  isProd: process.env.NODE_ENV === 'production',
+  chatEndpoint: `${apiUrl}/chat`,
+  streamEndpoint: `${apiUrl}/chat/stream`,
+  healthEndpoint: `${apiUrl}/health`,
 });
-
-console.log('ARIA API URL:', config.apiUrl);
 
 export default config;

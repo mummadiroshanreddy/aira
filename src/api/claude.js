@@ -1,5 +1,5 @@
 // ════════════════════════════════
-// FILE: src/api/claude.js (v4.3)
+// FILE: src/api/claude.js (v4.4 — reads provider from ProviderContext)
 // Server emits: stream_start, stream_token, stream_end, stream_error, stream_fallback
 // ════════════════════════════════
 
@@ -14,6 +14,10 @@ export const cancelActiveStream = () => {
   }
 };
 
+// Internal helper — reads provider from localStorage so non-hook callers can use it
+const getActiveProvider = () =>
+  localStorage.getItem('aria_provider') || 'groq';
+
 export const streamClaude = (
   systemPrompt,
   userMessage,
@@ -23,7 +27,8 @@ export const streamClaude = (
   onDone,
   onError,
   onProviderInfo,
-  onProviderSwitch
+  onProviderSwitch,
+  providerOverride  // optional — pass from component if you have it from useProvider()
 ) => {
   return new Promise((resolve, reject) => {
     if (!socket.connected) {
@@ -32,7 +37,7 @@ export const streamClaude = (
       return reject(err);
     }
 
-    // Build messages — FILTER OUT empty content to prevent server validation failure
+    // Build messages — filter out empty content (prevents server validation error)
     const messages = history
       .map(m => ({ role: m.role, content: m.content }))
       .filter(m => m.role && m.content && m.content.trim() !== '');
@@ -47,20 +52,25 @@ export const streamClaude = (
       return reject(err);
     }
 
+    const provider = providerOverride || getActiveProvider();
+
     const payload = {
-      userId: userId || 'anonymous',
+      userId: userId || localStorage.getItem('aria_user_id') || 'anonymous',
       system: systemPrompt,
-      messages: messages.slice(-12), // keep last 12 turns
+      messages: messages.slice(-12),
+      provider,
     };
 
     let fullText = '';
     let streamId = null;
 
-    const handleStart = ({ streamId: id, provider }) => {
+    const handleStart = ({ streamId: id, provider: serverProvider }) => {
       streamId = id;
       currentStreamId = id;
       if (onProviderInfo) {
-        onProviderInfo(provider === 'groq' ? '⚡ Groq' : provider === 'gemini' ? '✨ Gemini' : '🦙 Ollama', provider);
+        const name = serverProvider === 'groq' ? '⚡ Groq'
+          : serverProvider === 'gemini' ? '✨ Gemini' : '🦙 Ollama';
+        onProviderInfo(name, serverProvider);
       }
     };
 
@@ -117,11 +127,22 @@ export const streamClaude = (
   });
 };
 
-// Promise-based wrapper (used by non-streaming components)
+// ── Promise-based wrapper (used by non-streaming components) ──
 export const callClaude = (systemPrompt, userMessage, history = [], userId) => {
-  return streamClaude(systemPrompt, userMessage, history, userId,
-    () => {}, (full) => full, null, null, null
-  );
+  return new Promise((resolve, reject) => {
+    let fullText = '';
+    streamClaude(
+      systemPrompt,
+      userMessage,
+      history,
+      userId,
+      (chunk) => { fullText += chunk; },  // onChunk
+      () => resolve(fullText),             // onDone
+      (err) => reject(err),               // onError
+      null,
+      null
+    ).catch(reject);
+  });
 };
 
 export default { streamClaude, cancelActiveStream, callClaude };
