@@ -47,7 +47,13 @@ const LiveCopilot = () => {
     startListening,
     stopListening,
     resetTranscript
-  } = useSpeech({ onSilence: handleSilenceFinal, silenceTimeoutMs: 450 });
+  } = useSpeech({ onSilence: handleSilenceFinal, silenceTimeoutMs: 750 });
+
+  // Sync submitRef on every render to ensure handleSilenceFinal has latest closure
+  useEffect(() => {
+    submitRef.current = submitQuestion;
+  });
+
 
   // Barge-in: interrupt AI if user starts speaking
   useEffect(() => {
@@ -143,10 +149,8 @@ Return ONLY a valid JSON array: [ { "question": "...", "answer": "⚡ HOOK\\n...
   };
 
   const submitQuestion = async (text, isRegen = false) => {
-    // Always keep submitRef current so handleSilenceFinal has latest version
-    submitRef.current = submitQuestion;
-
     if (!text || typeof text !== 'string' || !text.trim()) return;
+
     if (isGeneratingRef.current && !isRegen) return;
 
 
