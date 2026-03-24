@@ -1,66 +1,49 @@
-# 🏃 ARIA — Running Notes & Deployment Guide (v3.3)
+# 🏃 ARIA — Master State v4.0 "Elite Stabilization"
 
-Follow these steps to launch the ARIA AI Interview Copilot with the latest master fixes (PDF parsing, stable transport, and high-performance UI).
-
----
-
-### 1. 📦 Dependency Installation
-The latest version includes `pdf-parse` and `multer` for resume processing. You **must** run install in both directories.
-
-**Backend Setup:**
-```bash
-cd server
-npm install
-```
-
-**Frontend Setup:**
-```bash
-# From project root
-npm install
-```
+ARIA v4.0 is now a production-grade, fault-tolerant AI Interview Copilot with triple-provider redundancy.
 
 ---
 
-### 2. 🔑 Environment Configuration
-Create `.env` files based on the provided `.env.example` templates.
+### 🚀 Launch Sequence (Master v4.0)
 
-**Server (`server/.env`):**
-```env
-GROQ_API_KEY=your_key
-GEMINI_API_KEY=your_key
-PORT=3001
-ALLOWED_ORIGINS=http://localhost:3000
-```
+1. **📦 Dependencies**
+   Ensure you have the latest packages in both directories:
+   ```bash
+   cd server && npm install
+   cd .. && npm install
+   ```
 
-**Frontend (`.env`):**
-```env
-REACT_APP_SERVER_URL=http://localhost:3001
-REACT_APP_API_URL=http://localhost:3001/api
-```
+2. **🖥️ Local AI (Ollama)**
+   Ollama is required for the zero-limit fallback.
+   ```bash
+   ollama run llama3
+   ```
 
----
+3. **🔑 Keys (.env)**
+   Ensure `GROQ_API_KEY` and `GEMINI_API_KEY` are set in `server/.env`.
 
-### 3. 🚀 Launching the Engine
-Use the unified start command to boot both server and client.
-
-```bash
-cd server
-npm run start:both
-```
+4. **⚡ Start**
+   ```bash
+   cd server
+   npm run start:both
+   ```
 
 ---
 
-### 4. 🧪 Featured Fixes (v3.3)
-- **PDF Resume Upload:** In the Setup screen, click the upload button to automatically extract text from your resume.
-- **Manual Mic Control:** Use the `🎙️ Mic ON / 🔇 Mic OFF` button in the Live Copilot header for direct control.
-- **Hybrid Transport:** The app now starts with Polling and upgrades to WSS automatically, preventing disconnections.
-- **Stealth Mode Stability:** Layout fixes ensure the "Meeting Notes" mode is perfectly aligned with no duplicate CSS conflicts.
+### 🔥 New Elite Features (v4.0)
+
+- **Triple-Tier Fallback:** ⚡ Groq (Fastest) ➜ 🧠 Gemini (Intelligent) ➜ 🖥️ Local Ollama (Unstoppable).
+- **DOCX & PDF Parsing:** Upload real resume files; ARIA now uses `mammoth` and `pdf-parse`.
+- **Auto-Summarization:** ARIA summarizes your resume on upload to inject high-density context into response generation.
+- **WebSocket Heartbeat:** 100% stable connection with active 10s ping intervals.
+- **Provider UI:** Real-time indicator shows exactly which AI is answering.
 
 ---
 
-### 5. 🛠 Troubleshooting
-- **Socket Disconnected:** Ensure the `ALLOWED_ORIGINS` in `server/.env` matches your frontend URL.
-- **Mic Access:** Ensure browser permissions are granted. If it stays RED, click the Mic toggle button twice.
-- **PDF Parsing Error:** Ensure you ran `npm install` in the `server` folder to initialize the `pdf-parse` binary.
+### 🛠 Troubleshooting (Elite Tier)
 
-**ARIA v3.3: Master State. Zero Latency. Full Control.** 🎤🔥🚀
+- **Local Fallback Triggered:** If Groq or Gemini are slow (>10s), ARIA will automatically hot-swap to the next provider mid-session.
+- **Ollama Refused Connection:** Ensure Ollama is running (`ollama serve`) and the model `llama3` is pulled.
+- **Audio Lag:** ARIA now purges audio buffers instantly on barge-in. If audio hangs, toggle the **Mic ON/OFF** button.
+
+**ARIA v4.0: The Unstoppable Copilot.** 🎤🛡️🚀

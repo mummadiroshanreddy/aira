@@ -6,6 +6,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useHotkeys } from './hooks/useHotkeys';
 import { useTimer } from './hooks/useTimer';
 import { useVault } from './hooks/useVault';
+import { v4 as uuidv4 } from 'uuid';
 
 import SetupScreen from './components/Setup/SetupScreen';
 import Sidebar from './components/Layout/Sidebar';
@@ -53,10 +54,20 @@ const App = () => {
   const { saveAnswer } = useVault();
 
   useEffect(() => {
-    const saved = localStorage.getItem('aria_setup');
+    let saved = localStorage.getItem('aria_setup');
+    let userId = localStorage.getItem('aria_user_id');
+    
+    if (!userId) {
+      userId = uuidv4();
+      localStorage.setItem('aria_user_id', userId);
+    }
+
     if (saved) {
-      setSetupData(JSON.parse(saved));
+      const parsed = JSON.parse(saved);
+      setSetupData({ ...parsed, userId });
       setSetupComplete(true);
+    } else {
+      setSetupData(prev => ({ ...prev, userId }));
     }
   }, []);
 
