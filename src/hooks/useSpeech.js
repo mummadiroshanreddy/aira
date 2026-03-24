@@ -93,8 +93,7 @@ export const useSpeech = (options = {}) => {
     }, silenceTimeoutMs);
 
     return () => clearTimeout(silenceTimerRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcript, interimTranscript, silenceTimeoutMs]);
+  }, [transcript, interimTranscript, silenceTimeoutMs]); // onSilence ref is stable, omitted intentionally
 
   const startListening = useCallback(() => {
     if (!recognitionRef.current || isListeningRef.current) return;
