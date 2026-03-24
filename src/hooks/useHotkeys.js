@@ -32,6 +32,7 @@ export const useHotkeys = (callbacks) => {
         if (key === '6' && callbacks.onMode) { e.preventDefault(); callbacks.onMode(6); }
         if (key === '7' && callbacks.onMode) { e.preventDefault(); callbacks.onMode(7); }
         if (key === '8' && callbacks.onMode) { e.preventDefault(); callbacks.onMode(8); }
+        if (key === '9' && callbacks.onMode) { e.preventDefault(); callbacks.onMode(9); }
       }
 
       // Ctrl + Key bindings (no shift)

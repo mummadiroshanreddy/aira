@@ -14,6 +14,7 @@ const Sidebar = ({ currentMode, setCurrentMode, setupData, onEditProfile, onHelp
     { id: 6, icon: '⏱️', label: 'Rapid Fire Drills', hotkey: '6' },
     { id: 7, icon: '💾', label: 'Answer Vault', hotkey: '7' },
     { id: 8, icon: '✉️', label: 'Post-Interview', hotkey: '8' },
+    { id: 9, icon: '🤫', label: 'Silent Copilot', hotkey: '9' },
   ];
 
   return (

@@ -8,8 +8,8 @@
       "stripeCustomerId": null
     },
     "42055c0a-baa4-464b-bab3-44710ea5363d": {
-      "requests": 2,
-      "tokensUsed": 606,
+      "requests": 4,
+      "tokensUsed": 1229,
       "totalSessionMs": 0,
       "tier": "free",
       "stripeCustomerId": null

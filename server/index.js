@@ -8,6 +8,9 @@ const { Server } = require('socket.io');
 const { v4: uuidv4 } = require('uuid');
 const Groq = require('groq-sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 const { trackUsage } = require('./db');
 const { checkBillingTier, stripeWebhookPlaceholder } = require('./billing');
@@ -332,13 +335,35 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('whisper_chunk', async ({ audio, format = 'webm' }) => {
+    if (!audio || !hasGroq) return;
+    try {
+      const buffer = Buffer.from(audio, 'base64');
+      const tempPath = path.join(os.tmpdir(), `aria_vox_${Date.now()}.${format}`);
+      fs.writeFileSync(tempPath, buffer);
+
+      const transcription = await groq.audio.transcriptions.create({
+        file: fs.createReadStream(tempPath),
+        model: 'distil-whisper-large-v3-en', // Ultra-fast specialized model
+        response_format: 'text',
+      });
+
+      fs.unlinkSync(tempPath);
+      if (transcription && transcription.trim()) {
+        socket.emit('whisper_transcript', { text: transcription.trim() });
+      }
+    } catch (err) {
+      console.error('[whisper] Error:', err.message);
+    }
+  });
+
   socket.on('disconnect', () => console.log(`Socket Disconnected: ${socket.id}`));
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log('\n╔══════════════════════════════════════════╗');
-  console.log('║   ARIA v4.5 — Elite Voice AI Engine Up   ║');
+  console.log('║   ARIA v5.1 — Elite Silent Copilot Up    ║');
   console.log('╚══════════════════════════════════════════╝');
   console.log(`🚀 Port:     ${PORT}`);
   console.log(`⚡ Groq:     ${hasGroq ? 'Llama-3.3-70b ✓' : 'NOT SET'}`);

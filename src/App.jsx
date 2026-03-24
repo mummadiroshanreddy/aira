@@ -30,6 +30,7 @@ const QuestionPredictor = React.lazy(() => import('./components/Modes/QuestionPr
 const RapidFire = React.lazy(() => import('./components/Modes/RapidFire'));
 const AnswerVault = React.lazy(() => import('./components/Modes/AnswerVault'));
 const PostInterview = React.lazy(() => import('./components/Modes/PostInterview'));
+const SilentCopilot = React.lazy(() => import('./components/Modes/SilentCopilot'));
 
 export const AppContext = React.createContext();
 
@@ -121,13 +122,15 @@ const App = () => {
       case 6: return <RapidFire />;
       case 7: return <AnswerVault />;
       case 8: return <PostInterview />;
+      case 9: return <SilentCopilot />;
       default: return <LiveCopilot />;
     }
   };
 
   const modeNames = {
     1: 'Live Copilot', 2: 'Confidence Scorer', 3: 'Company Intel', 4: 'Salary War Room',
-    5: 'Question Predictor', 6: 'Rapid Fire Drills', 7: 'Answer Vault', 8: 'Post-Interview'
+    5: 'Question Predictor', 6: 'Rapid Fire Drills', 7: 'Answer Vault', 8: 'Post-Interview',
+    9: 'Silent Copilot (System Audio)'
   };
 
   return (
