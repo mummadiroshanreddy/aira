@@ -97,7 +97,7 @@ app.post('/api/billing/webhook', stripeWebhookPlaceholder);
 
 // ── Provider config ───────────────────────────────────
 const PROVIDERS = {
-  groq:   { name: 'Groq',   model: 'llama-3.3-70b-specdec', available: hasGroq,   speed: 'Fastest', badge: '⚡' },
+  groq:   { name: 'Groq',   model: 'llama-3.1-8b-instant', available: hasGroq,   speed: 'Fastest', badge: '⚡' },
   gemini: { name: 'Gemini', model: 'gemini-2.0-flash',       available: hasGemini, speed: 'Fast',    badge: '✨' }
 };
 
