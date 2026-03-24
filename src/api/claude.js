@@ -87,7 +87,23 @@ export const streamClaude = (
   });
 };
 
+export const callClaude = async (systemPrompt, userMessage, history = [], userId) => {
+  let fullText = '';
+  return new Promise((resolve, reject) => {
+    streamClaude(
+      systemPrompt,
+      userMessage,
+      history,
+      userId || 'anonymous',
+      (chunk) => { fullText += chunk; },
+      () => resolve(fullText),
+      (err) => reject(err)
+    ).catch(reject);
+  });
+};
+
 export default {
   streamClaude,
-  cancelActiveStream
+  cancelActiveStream,
+  callClaude
 };

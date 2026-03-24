@@ -3,7 +3,7 @@
 // ════════════════════════════════
 
 import React, { useState, useContext } from 'react';
-import { callClaude } from '../../api/claude';
+import { streamClaude } from '../../api/claude';
 import { AppContext } from '../../App';
 import { toast } from '../UI/Toast';
 
@@ -37,37 +37,47 @@ MUSTPREP: Q2,Q5,Q9
 (the 3 question numbers most critical to nail)`;
 
     try {
-      const resp = await callClaude(prompt, "Predict questions.");
-      
-      const lines = resp.split('\n').map(l => l.trim()).filter(Boolean);
-      const qList = [];
-      let mPrep = [];
+      await streamClaude(
+        prompt,
+        "Predict questions.",
+        [],
+        setupData?.userId,
+        () => {},
+        (resp) => {
+          const lines = resp.split('\n').map(l => l.trim()).filter(Boolean);
+          const qList = [];
+          let mPrep = [];
 
-      lines.forEach(line => {
-        if (line.startsWith('MUSTPREP:')) {
-          mPrep = line.replace('MUSTPREP:', '').split(',').map(s => s.trim());
-        } else if (line.match(/^Q\d+\|/)) {
-          const parts = line.split('|');
-          if (parts.length >= 6) {
-            qList.push({
-              id: parts[0].trim(),
-              text: parts[1].trim(),
-              category: parts[2].trim(),
-              difficulty: parts[3].trim(),
-              probability: parseInt(parts[4], 10) || 50,
-              why: parts[5].trim(),
-              practiced: false
-            });
-          }
+          lines.forEach(line => {
+            if (line.startsWith('MUSTPREP:')) {
+              mPrep = line.replace('MUSTPREP:', '').split(',').map(s => s.trim());
+            } else if (line.match(/^Q\d+\|/)) {
+              const parts = line.split('|');
+              if (parts.length >= 6) {
+                qList.push({
+                  id: parts[0].trim(),
+                  text: parts[1].trim(),
+                  category: parts[2].trim(),
+                  difficulty: parts[3].trim(),
+                  probability: parseInt(parts[4], 10) || 50,
+                  why: parts[5].trim(),
+                  practiced: false
+                });
+              }
+            }
+          });
+          setQuestions(qList);
+          setMustPrep(mPrep);
+          setIsGenerating(false);
+          toast.show('15 high-probability questions generated', 'success');
+        },
+        (err) => {
+          toast.show(err.message, 'error');
+          setIsGenerating(false);
         }
-      });
-      
-      setQuestions(qList);
-      setMustPrep(mPrep);
-      toast.show('15 high-probability questions generated', 'success');
+      );
     } catch (err) {
       toast.show(err.message, 'error');
-    } finally {
       setIsGenerating(false);
     }
   };

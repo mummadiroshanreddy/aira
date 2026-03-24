@@ -3,7 +3,7 @@
 // ════════════════════════════════
 
 import React, { useState, useContext } from 'react';
-import { callClaude } from '../../api/claude';
+import { streamClaude } from '../../api/claude';
 import { AppContext } from '../../App';
 import { toast } from '../UI/Toast';
 
@@ -38,12 +38,17 @@ Requirements:
 - Output ONLY the subject line and email body. No pleasantries like "Here is the email:".`;
 
     try {
-      const resp = await callClaude(prompt, "Draft email.");
-      setTyDraft(resp);
-      toast.show('Thank you note drafted', 'success');
+      await streamClaude(
+        prompt,
+        "Draft email.",
+        [],
+        setupData?.userId,
+        (chunk) => setTyDraft(prev => (prev || '') + chunk),
+        () => { setIsGeneratingTy(false); toast.show('Thank you note drafted', 'success'); },
+        (e) => { toast.show(e.message, 'error'); setIsGeneratingTy(false); }
+      );
     } catch (e) {
       toast.show(e.message, 'error');
-    } finally {
       setIsGeneratingTy(false);
     }
   };
@@ -69,25 +74,32 @@ Subject: [subject line]
 [Tactical next steps for their job search this week]`;
 
     try {
-      const resp = await callClaude(prompt, "Analyze rejection.");
-      
-      const sections = {};
-      const parts = resp.split(/(?=🩹|📧|📈|🚀)/g).map(s => s.trim()).filter(Boolean);
-      parts.forEach(p => {
-        const headerEnd = p.indexOf('\n');
-        const header = headerEnd > -1 ? p.substring(0, headerEnd).trim() : p.trim();
-        const content = headerEnd > -1 ? p.substring(headerEnd).trim() : '';
-        if(header.includes('🩹')) sections.decoded = content;
-        if(header.includes('📧')) sections.email = content;
-        if(header.includes('📈')) sections.gap = content;
-        if(header.includes('🚀')) sections.moves = content;
-      });
-      
-      setRejPlan(sections);
-      toast.show('Recovery plan compiled', 'success');
+      await streamClaude(
+        prompt,
+        "Analyze rejection.",
+        [],
+        setupData?.userId,
+        () => {},
+        (resp) => {
+          const sections = {};
+          const parts = resp.split(/(?=🩹|📧|📈|🚀)/g).map(s => s.trim()).filter(Boolean);
+          parts.forEach(p => {
+            const headerEnd = p.indexOf('\n');
+            const header = headerEnd > -1 ? p.substring(0, headerEnd).trim() : p.trim();
+            const content = headerEnd > -1 ? p.substring(headerEnd).trim() : '';
+            if(header.includes('🩹')) sections.decoded = content;
+            if(header.includes('📧')) sections.email = content;
+            if(header.includes('📈')) sections.gap = content;
+            if(header.includes('🚀')) sections.moves = content;
+          });
+          setRejPlan(sections);
+          setIsGeneratingRej(false);
+          toast.show('Recovery plan compiled', 'success');
+        },
+        (e) => { toast.show(e.message, 'error'); setIsGeneratingRej(false); }
+      );
     } catch (e) {
       toast.show(e.message, 'error');
-    } finally {
       setIsGeneratingRej(false);
     }
   };
