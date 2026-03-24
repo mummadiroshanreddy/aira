@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
-import { AppContext } from '../../App';
+import React, { useState, useEffect, useRef } from 'react';
 
 const SetupScreen = ({ onComplete }) => {
   const [step, setStep] = useState(1);
@@ -7,8 +6,10 @@ const SetupScreen = ({ onComplete }) => {
   const [resumeFileName, setResumeFileName] = useState('');
   const [resumeUploading, setResumeUploading] = useState(false);
   const fileInputRef = useRef(null);
-  
-  const { setupData } = useContext(AppContext);
+
+  // Read userId directly from localStorage — we render OUTSIDE AppContext.Provider
+  const userId = localStorage.getItem('aria_user_id') || 'anonymous';
+
   const [data, setData] = useState({
     name: '',
     role: '',
@@ -18,15 +19,17 @@ const SetupScreen = ({ onComplete }) => {
     style: 'Strategic',
     resume: '',
     jd: '',
-    userId: setupData?.userId || 'anonymous'
+    userId
   });
 
   useEffect(() => {
-    if (setupData?.name) {
+    const saved = localStorage.getItem('aria_setup');
+    if (saved) {
+      const parsed = JSON.parse(saved);
       setReturningUser(true);
-      setData(prev => ({ ...prev, ...setupData }));
+      setData(prev => ({ ...prev, ...parsed, userId }));
     }
-  }, [setupData]);
+  }, []);
 
   const handleChange = (field, val) => {
     setData(prev => ({ ...prev, [field]: val }));
