@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 // ── Voice Input Engine ────────────────────────────────
-// Native WebSpeech wrapper engineered for continuous execution,
-// predictive interim dispatch, and barge-in integrations.
+// WebSpeech API wrapper with continuous listening,
+// silence detection, and barge-in support.
 
 export const useSpeech = (options = {}) => {
   const { onSilence, silenceTimeoutMs = 700 } = options;
-  
+
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -15,74 +15,77 @@ export const useSpeech = (options = {}) => {
   const recognitionRef = useRef(null);
   const silenceTimerRef = useRef(null);
   const shouldListenRef = useRef(false);
+  const isListeningRef = useRef(false); // ref mirror to avoid stale closures
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = true;
-        recognitionRef.current.interimResults = true;
-        recognitionRef.current.lang = 'en-US';
-
-        recognitionRef.current.onresult = (event) => {
-          let finalTrans = '';
-          let interimTrans = '';
-          
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-              finalTrans += event.results[i][0].transcript;
-            } else {
-              interimTrans += event.results[i][0].transcript;
-            }
-          }
-
-          if (finalTrans) {
-            setTranscript(prev => {
-              const combined = (prev + ' ' + finalTrans).trim();
-              return combined.replace(/\b(\w+)( \1\b)+/gi, '$1');
-            });
-          }
-          setInterimTranscript(interimTrans);
-        };
-
-        recognitionRef.current.onerror = (event) => {
-          console.error("[useSpeech] Recognition error:", event.error);
-          if (event.error === 'not-allowed') {
-            setPermissionDenied(true);
-            shouldListenRef.current = false;
-            setIsListening(false);
-          }
-          if (event.error === 'no-speech') {
-             // perfectly normal, ignore
-          }
-        };
-
-        recognitionRef.current.onend = () => {
-          // Auto-reconnect explicitly unless manually stopped
-          if (shouldListenRef.current) {
-            try { recognitionRef.current.start(); } catch(e) {}
-          } else {
-            setIsListening(false);
-          }
-        };
-      }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.warn('[useSpeech] Web Speech API not supported in this browser.');
+      return;
     }
 
+    const rec = new SpeechRecognition();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+
+    rec.onstart = () => {
+      isListeningRef.current = true;
+      setIsListening(true);
+    };
+
+    rec.onresult = (event) => {
+      let finalTrans = '';
+      let interimTrans = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTrans += event.results[i][0].transcript;
+        } else {
+          interimTrans += event.results[i][0].transcript;
+        }
+      }
+      if (finalTrans) {
+        setTranscript(prev => (prev + ' ' + finalTrans).trim());
+      }
+      setInterimTranscript(interimTrans);
+    };
+
+    rec.onerror = (event) => {
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setPermissionDenied(true);
+        shouldListenRef.current = false;
+        isListeningRef.current = false;
+        setIsListening(false);
+      }
+      // 'no-speech', 'aborted' are normal — ignore
+    };
+
+    rec.onend = () => {
+      isListeningRef.current = false;
+      // Auto-restart unless manually stopped
+      if (shouldListenRef.current) {
+        try { rec.start(); } catch (_) {}
+      } else {
+        setIsListening(false);
+      }
+    };
+
+    recognitionRef.current = rec;
+
     return () => {
-      // Cleanup
+      shouldListenRef.current = false;
+      try { rec.stop(); } catch (_) {}
     };
   }, []);
 
-  // Decoupled Silence Tracker handles the logic cleanly without closure lock
+  // Silence detector — fires onSilence after no new words for silenceTimeoutMs
   useEffect(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    
+
     const fullText = (transcript + ' ' + interimTranscript).trim();
     if (!fullText) return;
 
     silenceTimerRef.current = setTimeout(() => {
-      setTranscript(fullText);
       setInterimTranscript('');
       if (fullText.length > 3 && onSilence) {
         onSilence(fullText);
@@ -90,33 +93,34 @@ export const useSpeech = (options = {}) => {
     }, silenceTimeoutMs);
 
     return () => clearTimeout(silenceTimerRef.current);
-  }, [transcript, interimTranscript, silenceTimeoutMs]); // onSilence intentionally omitted to prevent loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcript, interimTranscript, silenceTimeoutMs]);
 
   const startListening = useCallback(() => {
-    if (!recognitionRef.current || isListening) return;
+    if (!recognitionRef.current || isListeningRef.current) return;
     shouldListenRef.current = true;
+    setPermissionDenied(false);
     try {
       recognitionRef.current.start();
-      setIsListening(true);
-      setPermissionDenied(false);
-    } catch (err) {
-       // if already started
-       setIsListening(true);
+    } catch (_) {
+      // already started — that's fine
     }
-  }, [isListening]);
+  }, []);
 
   const stopListening = useCallback(() => {
     shouldListenRef.current = false;
-    if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    }
-  }, [isListening]);
+    try {
+      recognitionRef.current?.stop();
+    } catch (_) {}
+    isListeningRef.current = false;
+    setIsListening(false);
+  }, []);
 
-  const resetTranscript = () => {
+  const resetTranscript = useCallback(() => {
     setTranscript('');
     setInterimTranscript('');
-  };
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+  }, []);
 
   return {
     isListening,
@@ -125,6 +129,6 @@ export const useSpeech = (options = {}) => {
     permissionDenied,
     startListening,
     stopListening,
-    resetTranscript
+    resetTranscript,
   };
 };
