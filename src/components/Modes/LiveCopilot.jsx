@@ -419,11 +419,41 @@ Style: ${setupData?.type || 'Behavioral'}
         </div>
       )}
 
-      {/* Live transcript */}
-      {(transcript || interimTranscript) && (
-        <div style={{ padding: 14, background: 'var(--bg-raised)', border: '1px solid rgba(0,240,255,0.2)', borderRadius: 8, color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 12, fontSize: 14 }}>
-          <div style={{ width: 4, height: 16, background: 'var(--cyan)', borderRadius: 2, animation: 'barPulse 0.5s infinite alternate' }} />
-          <span>"{transcript}<span style={{ opacity: 0.6 }}>{interimTranscript}</span>"</span>
+      {/* ── ELITE AUDIO STATE BAR ── */}
+      {(isListening || isGenerating || isSpeaking || transcript || interimTranscript) && (
+        <div style={{ padding: '12px 20px', background: 'var(--bg-raised)', border: `1px solid ${
+          isSpeaking ? 'rgba(74,222,128,0.3)' :
+          isGenerating ? 'rgba(0,240,255,0.3)' :
+          (transcript || interimTranscript) ? 'rgba(0,240,255,0.2)' :
+          'rgba(255,255,255,0.05)'
+        }`, borderRadius: 10, display: 'flex', alignItems: 'center', gap: 16, transition: 'border-color 0.3s' }}>
+          {/* Animated waveform bars */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, height: 24 }}>
+            {[...Array(5)].map((_, i) => (
+              <div key={i} style={{
+                width: 3, borderRadius: 2,
+                background: isSpeaking ? 'var(--green)' : isGenerating ? 'var(--cyan)' : (transcript || interimTranscript) ? 'var(--cyan)' : 'var(--border-dim)',
+                height: isSpeaking || isGenerating || transcript || interimTranscript ? `${12 + Math.random() * 12}px` : '4px',
+                animation: (isSpeaking || isGenerating || (transcript || interimTranscript)) ? `barPulse 0.${4 + i}s infinite alternate` : 'none',
+                transition: 'height 0.15s, background 0.3s'
+              }} />
+            ))}
+          </div>
+          {/* State label */}
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, fontFamily: 'JetBrains Mono',
+            color: isSpeaking ? 'var(--green)' : isGenerating ? 'var(--cyan)' : 'var(--cyan)' }}>
+            {isSpeaking ? '🔊 ARIA SPEAKING' : isGenerating ? '⚡ ARIA THINKING' : '🎙️ LISTENING'}
+          </div>
+          {/* Transcript text */}
+          {(transcript || interimTranscript) && (
+            <div style={{ flex: 1, fontSize: 14, color: 'rgba(255,255,255,0.9)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              "{transcript}<span style={{ opacity: 0.5 }}>{interimTranscript}</span>"
+            </div>
+          )}
+          {/* Silence countdown ring — visual cue before auto-submit */}
+          {(transcript || interimTranscript) && !isGenerating && (
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'JetBrains Mono', flexShrink: 0 }}>AUTO-SUBMIT ON SILENCE</div>
+          )}
         </div>
       )}
 

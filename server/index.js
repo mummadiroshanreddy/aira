@@ -28,6 +28,29 @@ console.log(`🔑 Gemini: ${hasGemini ? 'SET ✓' : 'NOT SET ✗'}\n`);
 const groq  = hasGroq   ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const genAI = hasGemini ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
+// ── Provider Warmup (reduces TTFT by pre-initializing connections) ──
+const warmupProviders = async () => {
+  if (groq) {
+    try {
+      // Single-token warmup keeps the connection alive
+      const warm = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1,
+        stream: false
+      });
+      console.log('⚡ Groq warmed up ✓');
+    } catch (e) { console.warn('Groq warmup failed (non-fatal):', e.message); }
+  }
+  if (genAI) {
+    try {
+      // Pre-initialize the model object (no API call, just warms the client)
+      genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      console.log('✨ Gemini warmed up ✓');
+    } catch (e) { console.warn('Gemini warmup failed (non-fatal):', e.message); }
+  }
+};
+
 const app = express();
 const server = http.createServer(app);
 
@@ -229,7 +252,7 @@ io.on('connection', (socket) => {
 
         if (!isFallback) {
           fallbackTimer = setTimeout(() => {
-            console.warn(`[${targetProvider}] TTFT >5s — triggering fallback`);
+            console.warn(`[${targetProvider}] TTFT >2s — triggering fallback`);
             fallbackTriggered = true;
             controller.abort();
             const nextProvider = targetProvider === 'groq' ? 'gemini' : 'groq';
@@ -240,7 +263,7 @@ io.on('connection', (socket) => {
             } else {
               socket.emit('stream_error', { streamId, error: 'Provider timeout and no fallback available.' });
             }
-          }, 5000);
+          }, 2000); // 2s TTFT threshold for ultra-low latency
         }
 
         if (targetProvider === 'groq') {
@@ -288,12 +311,15 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log('\n╔══════════════════════════════════════════╗');
-  console.log('║     ARIA v4.2 — Production Engine Up     ║');
+  console.log('║   ARIA v4.5 — Elite Voice AI Engine Up   ║');
   console.log('╚══════════════════════════════════════════╝');
   console.log(`🚀 Port:     ${PORT}`);
   console.log(`⚡ Groq:     ${hasGroq ? 'Llama-3.3-70b ✓' : 'NOT SET'}`);
   console.log(`✨ Gemini:   ${hasGemini ? 'Gemini-2.0-Flash ✓' : 'NOT SET'}`);
-  console.log('🔗 Handshake: Polling → WebSocket\n');
+  console.log('🔗 Handshake: Polling → WebSocket');
+  console.log('⏱️  TTFT Threshold: 2s (auto-fallback)\n');
+  // Warm up providers 3s after start (let ports bind first)
+  setTimeout(warmupProviders, 3000);
 });
 
 process.on('uncaughtException', (err) => console.error('CRITICAL:', err));
