@@ -19,9 +19,18 @@ const LiveCopilot = () => {
   const messagesEndRef = useRef(null);
   const { speakChunk, flush, cancel: cancelTTS, isSpeaking } = useTTS();
 
+  // ── Wire aria_submit: fired by InputBar Ctrl+Enter or send button ──
+  useEffect(() => {
+    const handleAriaSubmit = (e) => {
+      if (e.detail) submitQuestion(e.detail);
+    };
+    window.addEventListener('aria_submit', handleAriaSubmit);
+    return () => window.removeEventListener('aria_submit', handleAriaSubmit);
+  }, []); // eslint-disable-line
+
   const handleSilenceFinal = useCallback((stableText) => {
     if (stableText.trim().length > 3) submitQuestion(stableText.trim());
-  }, []);
+  }, []); // eslint-disable-line
 
   const {
     isListening,
@@ -32,25 +41,25 @@ const LiveCopilot = () => {
     resetTranscript 
   } = useSpeech({ onSilence: handleSilenceFinal, silenceTimeoutMs: 450 });
 
-  // Barge-in Cleanup
+  // ── Barge-in: new speech while AI is talking → cancel ──
   useEffect(() => {
     if (interimTranscript.trim().length > 0 && (isGeneratingRef.current || isSpeaking)) {
       cancelActiveStream();
       cancelTTS();
       setIsGenerating(false);
       isGeneratingRef.current = false;
-      toast.show('AI Interrupted', 'info');
     }
   }, [interimTranscript, isSpeaking, cancelTTS]);
 
   useEffect(() => {
     startListening();
     return () => stopListening();
-  }, []);
+  }, []); // eslint-disable-line
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [history]);
+
 
   const parseSections = (content) => {
     const parts = content.split(/(?=⚡|🎯|📍|🔥|⚠️|💡)/g).map(s => s.trim()).filter(Boolean);
